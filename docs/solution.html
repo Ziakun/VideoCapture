@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>MeetVideoCapture - Technical Solution</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 15mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #17202a;
+      background: #f5f7fb;
+      font-family: "Inter", "Segoe UI", Arial, sans-serif;
+      font-size: 12.4px;
+      line-height: 1.46;
+    }
+
+    .page {
+      background: #ffffff;
+      border: 1px solid #d9e0ea;
+      border-radius: 14px;
+      padding: 22px 24px;
+      box-shadow: 0 12px 30px rgba(28, 41, 61, 0.08);
+    }
+
+    .hero {
+      padding: 18px 20px;
+      border-radius: 12px;
+      color: #ffffff;
+      background: linear-gradient(135deg, #0f766e 0%, #1f2937 62%, #111827 100%);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 20px 0 8px;
+      color: #0f766e;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 14px 0 6px;
+      color: #1f2937;
+      font-size: 13px;
+    }
+
+    p {
+      margin: 6px 0;
+    }
+
+    ul {
+      margin: 7px 0 0 18px;
+      padding: 0;
+    }
+
+    li {
+      margin: 3px 0;
+    }
+
+    code {
+      padding: 1px 4px;
+      border-radius: 4px;
+      color: #0f172a;
+      background: #eaf0f7;
+      font-family: "JetBrains Mono", "Consolas", monospace;
+      font-size: 11.5px;
+    }
+
+    .subtitle {
+      max-width: 620px;
+      margin: 0;
+      color: #d7f7f1;
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .card {
+      border: 1px solid #dce5ef;
+      border-radius: 10px;
+      padding: 11px 12px;
+      background: #fbfdff;
+    }
+
+    .card strong {
+      color: #0f766e;
+    }
+
+    .warning {
+      border-color: #f1c96b;
+      background: #fff8e5;
+    }
+
+    .ok {
+      border-color: #9bd9c8;
+      background: #eefbf7;
+    }
+
+    .diagram {
+      margin-top: 10px;
+      padding: 13px;
+      border: 1px solid #ced8e5;
+      border-radius: 10px;
+      background: #f8fafc;
+      font-family: "JetBrains Mono", "Consolas", monospace;
+      font-size: 11.3px;
+      line-height: 1.5;
+      white-space: pre;
+      color: #102033;
+    }
+
+    .pipeline {
+      margin-top: 8px;
+      padding: 10px 11px;
+      border-left: 4px solid #0f766e;
+      border-radius: 8px;
+      background: #f3f7fa;
+      font-family: "JetBrains Mono", "Consolas", monospace;
+      font-size: 10.8px;
+      line-height: 1.45;
+    }
+
+    .tagline {
+      display: inline-block;
+      margin: 8px 6px 0 0;
+      padding: 4px 8px;
+      border-radius: 999px;
+      color: #d7f7f1;
+      background: rgba(255, 255, 255, 0.12);
+      font-size: 11px;
+    }
+
+    .muted {
+      color: #5b6778;
+    }
+
+    .footer {
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px solid #e2e8f0;
+      color: #657386;
+      font-size: 10.8px;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>MeetVideoCapture: техническое решение</h1>
+      <p class="subtitle">
+        Приложение захватывает уже отрисованное видео Google Meet из окна браузера на Ubuntu X11,
+        показывает crop в Qt/QML preview и по кнопке пишет его в MKV/H.264.
+      </p>
+      <span class="tagline">Qt 6 / C++ / QML</span>
+      <span class="tagline">X11 window capture</span>
+      <span class="tagline">GStreamer</span>
+      <span class="tagline">No browser hacking</span>
+    </section>
+
+    <section class="grid">
+      <div class="card ok">
+        <strong>Что делаем</strong>
+        <ul>
+          <li>Находим top-level окно браузера через X11.</li>
+          <li>Захватываем pixels этого окна по <code>XID</code>.</li>
+          <li>Обрезаем область Meet video внутри окна.</li>
+          <li>Показываем только crop и, при необходимости, пишем файл.</li>
+        </ul>
+      </div>
+      <div class="card warning">
+        <strong>Чего принципиально не делаем</strong>
+        <ul>
+          <li>Не перехватываем внутренний <code>WebRTC MediaStream</code>.</li>
+          <li>Не вытаскиваем <code>VideoTrack</code> из браузера.</li>
+          <li>Не используем tab capture API и Chrome extension.</li>
+          <li>Не используем Selenium/CDP/injection/packet sniffing.</li>
+        </ul>
+      </div>
+    </section>
+
+    <h2>1. Основная идея</h2>
+    <p>
+      Google Meet уже декодирует WebRTC-видео и рисует его в окне браузера. Поэтому backend
+      работает ниже уровня браузера: он берет готовую картинку окна из X11. Для приложения это
+      обычный поток raw video frames, а не WebRTC stream.
+    </p>
+
+    <div class="diagram">Google Meet в браузере
+    ↓
+браузер декодирует WebRTC и рисует видео
+    ↓
+X11 capture top-level browser window by XID
+    ↓
+crop области Meet video относительно окна браузера
+    ↓
+Qt/QML preview latest frame
+    ↓
+optional MKV/H.264 recording</div>
+
+    <h2>2. Захват окна</h2>
+    <p>
+      <code>X11WindowFinder</code> читает список top-level окон, получает title, className,
+      XID, geometry и PID. Браузеры сортируются выше остальных, но выбрать можно любое окно.
+      После выбора controller передает XID и geometry в capture settings.
+    </p>
+    <div class="pipeline">ximagesrc xid=&lt;browserWindowId&gt; use-damage=false show-pointer=false
+  ! video/x-raw,framerate=30/1
+  ! videocrop left=&lt;l&gt; top=&lt;t&gt; right=&lt;r&gt; bottom=&lt;b&gt;
+  ! videoconvert
+  ! video/x-raw,format=BGRA
+  ! queue leaky=downstream max-size-buffers=1
+  ! appsink emit-signals=true sync=false max-buffers=1 drop=true</div>
+
+    <p>
+      UI хранит crop как <code>x/y/width/height</code>. GStreamer <code>videocrop</code>
+      принимает <code>left/top/right/bottom</code>, поэтому controller пересчитывает значения
+      от размеров выбранного окна:
+    </p>
+    <div class="pipeline">left = cropX
+top = cropY
+right = sourceWidth - cropX - cropWidth
+bottom = sourceHeight - cropY - cropHeight</div>
+
+    <h2>3. Preview без накопления задержки</h2>
+    <p>
+      Preview построен по latest-frame strategy: хранится только последний кадр. Если UI не успел
+      отрисовать старый кадр, новый кадр его заменяет. Очереди preview нет, старые кадры не копятся.
+    </p>
+    <ul>
+      <li><code>appsink drop=true</code>, <code>max-buffers=1</code>, <code>sync=false</code>.</li>
+      <li><code>queue leaky=downstream</code>, <code>max-size-buffers=1</code>.</li>
+      <li><code>VideoFrameProvider</code> хранит latest <code>QImage</code> и сжимает update-сигналы.</li>
+      <li><code>VideoPreviewItem</code> отрисовывает кадр через Qt Quick scene graph texture node.</li>
+    </ul>
+
+    <h2>4. Запись</h2>
+    <p>
+      Recording не блокирует UI и не тормозит preview. Во время записи capture frames подаются в
+      <code>VideoRecorder</code>; когда запись выключена, этот feed отключен. Recorder имеет bounded
+      queue и при перегрузе начинает dropping, а не увеличивает latency.
+    </p>
+    <div class="pipeline">appsrc is-live=true format=time
+  ! queue max-size-buffers=30 leaky=downstream
+  ! videoconvert
+  ! video/x-raw,format=I420
+  ! x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=2500
+  ! h264parse
+  ! matroskamux
+  ! filesink location=&lt;meet-recording-YYYYMMDD-HHMMSS.mkv&gt;</div>
+    <p>
+      Формат по умолчанию - MKV/H.264. MKV выбран потому, что он надежнее для live recording:
+      при аварийном завершении меньше риск получить полностью непригодный файл, чем с MP4.
+    </p>
+
+    <h2>5. Потоки</h2>
+    <div class="grid">
+      <div class="card">
+        <strong>UI thread</strong>
+        <p>QML, состояние controller, таймер записи, scene graph scheduling. Долгие X11/GStreamer команды сюда не попадают.</p>
+      </div>
+      <div class="card">
+        <strong>Window refresh worker</strong>
+        <p><code>X11WindowFinder</code> перечисляет top-level окна в отдельном <code>QThread</code> и возвращает готовый список в UI.</p>
+      </div>
+      <div class="card">
+        <strong>Capture command worker</strong>
+        <p>Start/stop/restart/update crop идут последовательно в отдельном <code>QThread</code>, без блокировки QML.</p>
+      </div>
+      <div class="card">
+        <strong>Capture streaming path</strong>
+        <p>GStreamer streaming threads, appsink callback, FPS stats, black/stale sampling, latest frame update.</p>
+      </div>
+      <div class="card">
+        <strong>Recorder worker</strong>
+        <p>appsrc feeding, encoder/muxer/file sink, EOS/finalize без ожидания в UI thread.</p>
+      </div>
+      <div class="card">
+        <strong>Bounded data flow</strong>
+        <p>Нет unbounded queues. Preview не ждет recorder. При перегрузе лучше drop, чем latency.</p>
+      </div>
+    </div>
+
+    <h2>6. Fallback</h2>
+    <p>
+      Если XID capture дает черный или stale кадр, можно переключиться на
+      <code>ScreenRegionFallback</code>. Тогда <code>ximagesrc</code> берет видимую область экрана
+      по координатам crop. Это не tab capture и не extension: это захват pixels экрана.
+    </p>
+    <p class="muted">
+      Ограничение fallback: если поверх Meet окажется другое окно, оно тоже попадет в capture.
+    </p>
+
+    <h2>7. Ограничения MVP</h2>
+    <ul>
+      <li>Только Ubuntu X11. Wayland/PipeWire portal можно добавить отдельным backend позже.</li>
+      <li>Свернутое или скрытое окно браузера может не рендериться.</li>
+      <li>XID capture зависит от compositor/GPU/browser и иногда может быть black/stale.</li>
+      <li>Crop задается численно относительно окна браузера; визуальный overlay можно добавить позже.</li>
+    </ul>
+
+    <h2>8. Дальнейшее расширение на Windows и macOS</h2>
+    <p>
+      Linux/X11 backend должен оставаться первой реализацией общей архитектуры, а не отдельной
+      Linux-only веткой. Для расширения на Windows и macOS платформенный захват нужно отделить
+      от общей обработки кадров.
+    </p>
+    <div class="diagram">Platform capture backend
+    ↓
+common VideoFrame / frame abstraction
+    ↓
+crop / timestamp / format normalization
+    ↓
+common frame pipeline
+    ↓
+preview / analysis / recorder</div>
+
+    <p>
+      Платформозависимыми остаются перечисление окон, выбор native source id, permission model,
+      реальный capture API и работа с native pixel buffer или texture. Общими остаются frame
+      abstraction, crop settings, timestamps, FPS/statistics, black/stale detection,
+      bounded/latest-frame delivery, recorder interface, file naming и единая модель
+      warnings/errors.
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <strong>Linux</strong>
+        <p>
+          Текущий X11 путь: XID → GStreamer ximagesrc → crop → common frame.
+          Для Wayland логичное расширение: PipeWire / xdg-desktop-portal →
+          selected window или display stream → common frame.
+        </p>
+      </div>
+      <div class="card">
+        <strong>Windows</strong>
+        <p>
+          Основной путь: HWND / selected window → Windows Graphics Capture →
+          Direct3D texture frames → crop/convert → common frame. Не нужно строить backend
+          на GDI screenshots или screenshot loop.
+        </p>
+      </div>
+      <div class="card">
+        <strong>macOS</strong>
+        <p>
+          Основной путь: SCWindow или display → ScreenCaptureKit →
+          CMSampleBuffer / CVPixelBuffer → crop/convert → common frame.
+          Реализация частично будет Objective-C++.
+        </p>
+      </div>
+      <div class="card">
+        <strong>Recorder</strong>
+        <p>
+          На первом этапе можно оставить общий recorder через GStreamer appsrc →
+          x264enc → matroskamux → MKV/H.264, если GStreamer runtime поставляется вместе
+          с приложением. Позже возможны native recorder backends: Linux → GStreamer,
+          Windows → Media Foundation / hardware encoder, macOS → AVAssetWriter / VideoToolbox.
+        </p>
+      </div>
+    </div>
+
+    <p>
+      Ограничения Windows: может потребоваться user consent или picker, protected windows
+      могут не захватываться, minimized window может не обновляться, а GPU/driver/compositor
+      могут влиять на результат. В будущем желательно избегать лишнего GPU→CPU copy, если
+      preview и recorder смогут работать с texture напрямую.
+    </p>
+    <p>
+      Ограничения macOS: нужен Screen Recording permission, пользователь может запретить
+      доступ, protected content может не захватываться, minimized или hidden windows могут
+      не обновляться.
+    </p>
+    <p class="muted">
+      Главное правило: не смешивать платформенный capture backend с общей логикой обработки
+      и записи. Linux/X11, Windows и macOS должны быть разными реализациями одного capture
+      interface. Тогда Ubuntu X11 MVP остается первой платформенной реализацией общей
+      meeting/window capture architecture, а не Linux-only тупиком.
+    </p>
+
+    <div class="footer">
+      Итог: MeetVideoCapture не взламывает браузер и не трогает WebRTC. Он захватывает то, что браузер уже
+      отрисовал в X11-окне, обрезает нужную область и передает ее в быстрый preview и recorder.
+    </div>
+  </main>
+</body>
+</html>

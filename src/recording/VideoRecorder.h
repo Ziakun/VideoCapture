@@ -1,0 +1,74 @@
+#pragma once
+
+#include "capture/VideoFrame.h"
+#include "recording/RecordingSettings.h"
+
+#include <QMutex>
+#include <QObject>
+#include <QWaitCondition>
+
+#include <atomic>
+#include <deque>
+#include <thread>
+
+#include <gst/app/gstappsrc.h>
+#include <gst/gst.h>
+
+// Owns the GStreamer appsrc -> encoder -> muxer -> filesink recording pipeline.
+//
+// Frames are accepted through a bounded queue so recording cannot block preview
+// indefinitely. stopAsync() sends EOS and finalizes the file in the worker path,
+// not in the UI thread.
+class VideoRecorder : public QObject {
+    Q_OBJECT
+
+public:
+    explicit VideoRecorder(QObject* parent = nullptr);
+    ~VideoRecorder() override;
+
+    bool start(const RecordingSettings& settings, QString* errorMessage = nullptr);
+    void stopAsync();
+    bool isRecording() const;
+    bool isStopping() const;
+    QString currentFilePath() const;
+    bool pushFrame(const VideoFrame& frame);
+
+public slots:
+    void enqueueFrame(const VideoFrame& frame);
+
+signals:
+    void recordingStarted(const QString& filePath);
+    void recordingStopped(const QString& filePath);
+    void recordingFailed(const QString& error);
+    void droppedFrameCountChanged(quint64 droppedFrames);
+
+private:
+    bool checkPlugins(QString* errorMessage) const;
+    bool buildPipeline(const RecordingSettings& settings, QString* errorMessage);
+    QString buildPipelineDescription(const RecordingSettings& settings) const;
+    void workerLoop();
+    bool pushFrameToAppSrc(const VideoFrame& frame);
+    void cleanupPipeline();
+    void joinWorkerIfFinished();
+    void noteDroppedFrame();
+
+    mutable QMutex mutex;
+    QWaitCondition queueNotEmpty;
+    std::deque<VideoFrame> frameQueue;
+
+    GstElement* pipeline = nullptr;
+    GstElement* appSrc = nullptr;
+
+    RecordingSettings recordingSettings;
+    QString activeFilePath;
+
+    std::atomic_bool recording = false;
+    std::atomic_bool stopping = false;
+    std::atomic_bool acceptingFrames = false;
+    std::atomic<quint64> droppedFrames = 0;
+
+    std::thread worker;
+    quint64 frameIndex = 0;
+
+    static constexpr qsizetype maxQueuedFrames = 30;
+};
