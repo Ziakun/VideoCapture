@@ -65,6 +65,38 @@ Button {
         }
     }
 
-    ToolTip.visible: hovered
-    ToolTip.text: recording ? "Stop recording" : "Start recording"
+    onHoveredChanged: {
+        if (hovered) {
+            toolTipHideTimer.restart()
+            recordToolTip.open()
+        } else {
+            toolTipHideTimer.stop()
+            recordToolTip.close()
+        }
+    }
+
+    Timer {
+        id: toolTipHideTimer
+        interval: 10000
+        repeat: false
+        onTriggered: recordToolTip.close()
+    }
+
+    ToolTip {
+        id: recordToolTip
+        text: root.recording ? "Stop recording" : "Start recording"
+        y: root.height + 8
+        padding: 8
+        contentItem: Text {
+            text: recordToolTip.text
+            color: "#f8fafc"
+            font.pixelSize: 12
+        }
+        background: Rectangle {
+            radius: 6
+            color: "#111827"
+            border.color: "#334155"
+            border.width: 1
+        }
+    }
 }

@@ -14,6 +14,17 @@ Item {
     property string recordingTimeText: "00:00:00"
     property real fps: 0
     property string outputFilePath: ""
+    property string dismissedPreviewMessage: ""
+    readonly property bool previewMessageVisible: root.message.length > 0 && root.message !== root.dismissedPreviewMessage
+
+    signal dismissMessageRequested()
+
+    onCaptureRunningChanged: dismissedPreviewMessage = ""
+    onMessageChanged: {
+        if (message.length === 0) {
+            dismissedPreviewMessage = ""
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -41,33 +52,6 @@ Item {
 
         Behavior on border.color {
             ColorAnimation { duration: 180 }
-        }
-    }
-
-    Rectangle {
-        id: scanLine
-        width: Math.max(120, preview.width * 0.22)
-        height: 2
-        radius: 1
-        y: preview.y
-        x: preview.x - width
-        color: root.recording ? "#ef4444" : "#2dd4bf"
-        opacity: root.captureRunning ? 0.65 : 0
-
-        SequentialAnimation on x {
-            running: root.captureRunning
-            loops: Animation.Infinite
-            NumberAnimation {
-                from: preview.x - scanLine.width
-                to: preview.x + preview.width
-                duration: 1800
-                easing.type: Easing.InOutCubic
-            }
-            PauseAnimation { duration: 350 }
-        }
-
-        Behavior on opacity {
-            NumberAnimation { duration: 180 }
         }
     }
 
@@ -124,8 +108,8 @@ Item {
         color: "#dd0f172a"
         border.color: root.message.indexOf("black or stale") >= 0 ? "#f59e0b" : "#475569"
         visible: opacity > 0
-        opacity: root.message.length > 0 ? 1 : 0
-        scale: root.message.length > 0 ? 1 : 0.96
+        opacity: root.previewMessageVisible ? 1 : 0
+        scale: root.previewMessageVisible ? 1 : 0.96
 
         Behavior on opacity {
             NumberAnimation { duration: 160 }
@@ -137,13 +121,45 @@ Item {
         Label {
             id: messageLabel
             anchors.centerIn: parent
-            width: parent.width - 36
+            width: parent.width - 72
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             text: root.message
             color: root.message.indexOf("black or stale") >= 0 ? "#ffd166" : "#d8dde6"
             font.pixelSize: 22
             font.bold: true
+        }
+
+        Rectangle {
+            id: messageCloseButton
+            width: 28
+            height: 28
+            radius: 14
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.rightMargin: 8
+            anchors.topMargin: 8
+            color: closeMessageMouseArea.containsMouse ? "#263244" : "#182131"
+            border.color: "#475569"
+            visible: root.previewMessageVisible
+
+            Label {
+                anchors.centerIn: parent
+                text: "x"
+                color: "#e5e7eb"
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            MouseArea {
+                id: closeMessageMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: {
+                    root.dismissedPreviewMessage = root.message
+                    root.dismissMessageRequested()
+                }
+            }
         }
     }
 
@@ -162,13 +178,41 @@ Item {
             id: warningText
             anchors.fill: parent
             anchors.leftMargin: 16
-            anchors.rightMargin: 16
+            anchors.rightMargin: 48
             horizontalAlignment: Text.AlignLeft
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
             color: "#fde68a"
             text: root.warning
             font.pixelSize: 12
+        }
+
+        Rectangle {
+            id: warningCloseButton
+            width: 26
+            height: 26
+            radius: 13
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.rightMargin: 8
+            color: closeWarningMouseArea.containsMouse ? "#3b2a18" : "#251a10"
+            border.color: "#f59e0b"
+            visible: root.warning.length > 0
+
+            Label {
+                anchors.centerIn: parent
+                text: "x"
+                color: "#fde68a"
+                font.pixelSize: 12
+                font.bold: true
+            }
+
+            MouseArea {
+                id: closeWarningMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.dismissMessageRequested()
+            }
         }
 
         Behavior on y {

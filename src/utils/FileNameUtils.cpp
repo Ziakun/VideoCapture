@@ -3,17 +3,36 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
-#include <QStandardPaths>
 
 namespace FileNameUtils {
 
+namespace {
+
+QString normalizedFilePrefix(const QString& filePrefix)
+{
+    QString normalized;
+    normalized.reserve(filePrefix.size());
+
+    for (const QChar character : filePrefix.toLower()) {
+        if (character.isLetterOrNumber() || character == QLatin1Char('-') || character == QLatin1Char('_')) {
+            normalized.append(character);
+        } else if (!normalized.endsWith(QLatin1Char('-'))) {
+            normalized.append(QLatin1Char('-'));
+        }
+    }
+
+    while (normalized.endsWith(QLatin1Char('-')) || normalized.endsWith(QLatin1Char('_'))) {
+        normalized.chop(1);
+    }
+
+    return normalized.isEmpty() ? QStringLiteral("meeting-recording") : normalized;
+}
+
+} // namespace
+
 QString defaultOutputDirectory()
 {
-    QString base = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
-    if (base.isEmpty()) {
-        base = QDir::homePath() + QStringLiteral("/Videos");
-    }
-    return QDir(base).filePath(QStringLiteral("MeetVideoCapture"));
+    return QDir::home().filePath(QStringLiteral("Video Capture"));
 }
 
 bool ensureDirectory(const QString& path, QString* errorMessage)
@@ -33,10 +52,10 @@ bool ensureDirectory(const QString& path, QString* errorMessage)
     return false;
 }
 
-QString uniqueRecordingFilePath(const QString& outputDirectory)
+QString uniqueRecordingFilePath(const QString& outputDirectory, const QString& filePrefix)
 {
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
-    const QString baseName = QStringLiteral("meet-recording-%1").arg(stamp);
+    const QString baseName = QStringLiteral("%1-%2").arg(normalizedFilePrefix(filePrefix), stamp);
     QDir dir(outputDirectory);
 
     QString path = dir.filePath(baseName + QStringLiteral(".mkv"));

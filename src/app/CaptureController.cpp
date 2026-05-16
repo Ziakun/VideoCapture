@@ -3,9 +3,14 @@
 #include "utils/FileNameUtils.h"
 
 #include <QDir>
+#include <QImage>
 #include <QMetaObject>
 #include <QUrl>
 #include <QVariantMap>
+#include <QVector>
+
+#include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -29,14 +34,213 @@ QString captureModeToString(CaptureMode mode)
         : QStringLiteral("ScreenRegionFallback");
 }
 
+QString blackCaptureWarning()
+{
+    return QStringLiteral("Window capture may be black or stale");
+}
+
+int pixelDistance(QRgb left, QRgb right)
+{
+    return std::abs(qRed(left) - qRed(right))
+        + std::abs(qGreen(left) - qGreen(right))
+        + std::abs(qBlue(left) - qBlue(right));
+}
+
+double horizontalBoundaryScore(const QImage& image, int y, int xStart, int xEnd, int step)
+{
+    if (y <= 0 || y >= image.height()) {
+        return 0.0;
+    }
+
+    const auto* previousRow = reinterpret_cast<const QRgb*>(image.constScanLine(y - 1));
+    const auto* currentRow = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+    double total = 0.0;
+    int samples = 0;
+
+    for (int x = xStart; x <= xEnd; x += step) {
+        total += pixelDistance(previousRow[x], currentRow[x]);
+        ++samples;
+    }
+
+    return samples > 0 ? total / samples : 0.0;
+}
+
+double verticalBoundaryScore(const QImage& image, int x, int yStart, int yEnd, int step)
+{
+    if (x <= 0 || x >= image.width()) {
+        return 0.0;
+    }
+
+    double total = 0.0;
+    int samples = 0;
+
+    for (int y = yStart; y <= yEnd; y += step) {
+        const auto* row = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+        total += pixelDistance(row[x - 1], row[x]);
+        ++samples;
+    }
+
+    return samples > 0 ? total / samples : 0.0;
+}
+
+int strongestHorizontalBoundary(
+    const QImage& image,
+    int yStart,
+    int yEnd,
+    int xStart,
+    int xEnd,
+    int step,
+    double* bestScore)
+{
+    int bestY = -1;
+    double best = 0.0;
+
+    for (int y = yStart; y <= yEnd; ++y) {
+        const double score = horizontalBoundaryScore(image, y, xStart, xEnd, step);
+        if (score > best) {
+            best = score;
+            bestY = y;
+        }
+    }
+
+    if (bestScore) {
+        *bestScore = best;
+    }
+    return bestY;
+}
+
+int strongestVerticalBoundary(
+    const QImage& image,
+    int xStart,
+    int xEnd,
+    int yStart,
+    int yEnd,
+    int step,
+    double* bestScore)
+{
+    int bestX = -1;
+    double best = 0.0;
+
+    for (int x = xStart; x <= xEnd; ++x) {
+        const double score = verticalBoundaryScore(image, x, yStart, yEnd, step);
+        if (score > best) {
+            best = score;
+            bestX = x;
+        }
+    }
+
+    if (bestScore) {
+        *bestScore = best;
+    }
+    return bestX;
+}
+
+QRect detectLargeContentRect(const QImage& frame)
+{
+    if (frame.isNull() || frame.width() < 64 || frame.height() < 64) {
+        return {};
+    }
+
+    const QImage image = frame.convertToFormat(QImage::Format_RGB32);
+    const int width = image.width();
+    const int height = image.height();
+    const int step = std::clamp(std::min(width, height) / 520, 1, 5);
+    const int horizontalXStart = std::clamp(width / 10, 0, width - 1);
+    const int horizontalXEnd = std::clamp(width - width / 10, horizontalXStart, width - 1);
+
+    double topScore = 0.0;
+    const int top = strongestHorizontalBoundary(
+        image,
+        std::max(24, height / 10),
+        std::max(25, height * 55 / 100),
+        horizontalXStart,
+        horizontalXEnd,
+        step,
+        &topScore);
+
+    if (top < 0 || topScore < 12.0) {
+        return {};
+    }
+
+    double bottomScore = 0.0;
+    const int bottom = strongestHorizontalBoundary(
+        image,
+        std::min(height - 24, std::max(top + 64, height * 55 / 100)),
+        height - 24,
+        horizontalXStart,
+        horizontalXEnd,
+        step,
+        &bottomScore);
+
+    if (bottom <= top + 64 || bottomScore < 12.0) {
+        return {};
+    }
+
+    double leftScore = 0.0;
+    const int left = strongestVerticalBoundary(
+        image,
+        4,
+        std::max(4, width / 3),
+        top,
+        bottom,
+        step,
+        &leftScore);
+
+    double rightScore = 0.0;
+    const int right = strongestVerticalBoundary(
+        image,
+        std::min(width - 5, width * 2 / 3),
+        width - 5,
+        top,
+        bottom,
+        step,
+        &rightScore);
+
+    if (left < 0 || right <= left + 64 || leftScore < 6.0 || rightScore < 6.0) {
+        return {};
+    }
+
+    const int margin = std::max(8, std::min(width, height) / 90);
+    const QRect detected(
+        QPoint(std::max(0, left - margin), std::max(0, top - margin)),
+        QPoint(std::min(width - 1, right + margin), std::min(height - 1, bottom + margin)));
+
+    if (detected.width() < 64 || detected.height() < 64) {
+        return {};
+    }
+    if (static_cast<qint64>(detected.width()) * detected.height() < static_cast<qint64>(width) * height / 8) {
+        return {};
+    }
+
+    return detected;
+}
+
 QString displayTitle(const X11WindowInfo& info)
 {
-    return QStringLiteral("%1 | %2 | %3 | %4 | pid %5")
+    return QStringLiteral("%1 | %2 | %3 | %4 | %5 | pid %6")
         .arg(info.title)
+        .arg(info.sourceType)
         .arg(info.className.isEmpty() ? QStringLiteral("-") : info.className)
         .arg(xidString(info.xid))
         .arg(geometryString(info.geometry))
         .arg(info.pid >= 0 ? QString::number(info.pid) : QStringLiteral("-"));
+}
+
+QString recordingPrefixForSource(const QString& sourceType, const QString& title)
+{
+    if (sourceType == QLatin1String("Zoom")) {
+        return QStringLiteral("zoom-recording");
+    }
+
+    const QString titleLower = title.toLower();
+    if (titleLower.contains(QStringLiteral("google meet")) || titleLower.contains(QStringLiteral("meet.google"))) {
+        return QStringLiteral("meet-recording");
+    }
+    if (sourceType == QLatin1String("Browser")) {
+        return QStringLiteral("browser-recording");
+    }
+
+    return QStringLiteral("window-recording");
 }
 
 } // namespace
@@ -74,6 +278,7 @@ CaptureController::CaptureController(QObject* parent)
         captureStopPending = false;
         setIsCapturing(true);
         setStatusMessage(QStringLiteral("Capture started"));
+        tryPendingAutoCrop();
         updatePreviewMessage();
     }, Qt::QueuedConnection);
     connect(captureWorker, &CapturePipelineWorker::captureStopped, this, [this]() {
@@ -83,6 +288,8 @@ CaptureController::CaptureController(QObject* parent)
             stopRecording();
         }
         setIsCapturing(false);
+        autoCropPending = false;
+        autoCropAttemptsRemaining = 0;
         previewFrameProvider.clear();
         setHasPreviewFrame(false);
         currentFps = 0.0;
@@ -107,11 +314,7 @@ CaptureController::CaptureController(QObject* parent)
         updatePreviewMessage();
     }, Qt::QueuedConnection);
     connect(captureWorker, &CapturePipelineWorker::blackFrameDetected, this, [this]() {
-        setWarningMessage(QStringLiteral("Window capture may be black or stale"));
-        updatePreviewMessage();
-    }, Qt::QueuedConnection);
-    connect(captureWorker, &CapturePipelineWorker::staleFramesDetected, this, [this]() {
-        setWarningMessage(QStringLiteral("Window capture may be black or stale"));
+        setWarningMessage(blackCaptureWarning());
         updatePreviewMessage();
     }, Qt::QueuedConnection);
     connect(
@@ -130,7 +333,11 @@ CaptureController::CaptureController(QObject* parent)
 
     connect(&previewFrameProvider, &VideoFrameProvider::hasFrameChanged, this, [this]() {
         setHasPreviewFrame(previewFrameProvider.hasFrame());
+        tryPendingAutoCrop();
         updatePreviewMessage();
+    }, Qt::QueuedConnection);
+    connect(&previewFrameProvider, &VideoFrameProvider::frameChanged, this, [this]() {
+        tryPendingAutoCrop();
     }, Qt::QueuedConnection);
 
     connect(&recorder, &VideoRecorder::recordingStarted, this, [this](const QString& filePath) {
@@ -159,10 +366,6 @@ CaptureController::CaptureController(QObject* parent)
         setWarningMessage(error);
         setStatusMessage(error);
     });
-    connect(&recorder, &VideoRecorder::droppedFrameCountChanged, this, [this](quint64 droppedFrames) {
-        setWarningMessage(QStringLiteral("Recording is dropping frames: %1").arg(droppedFrames));
-    });
-
     recordingTimer.setInterval(1000);
     connect(&recordingTimer, &QTimer::timeout, this, [this]() {
         ++elapsedRecordingSeconds;
@@ -225,6 +428,11 @@ QString CaptureController::selectedWindowTitle() const
 qulonglong CaptureController::selectedWindowId() const
 {
     return static_cast<qulonglong>(currentSelectedWindowId);
+}
+
+QString CaptureController::selectedSourceType() const
+{
+    return currentSelectedSourceType;
 }
 
 QString CaptureController::outputFilePath() const
@@ -342,13 +550,14 @@ void CaptureController::selectWindow(qulonglong xid)
 
     currentSelectedWindowId = info->xid;
     currentSelectedWindowTitle = info->title;
+    currentSelectedSourceType = info->sourceType;
     captureSettings.mode = CaptureMode::X11WindowById;
     updateSourceFromSelectedWindow(*info);
     applyCropRect(QRect(0, 0, info->geometry.width(), info->geometry.height()));
     previewFrameProvider.clear();
     setHasPreviewFrame(false);
     setWarningMessage(QString());
-    setStatusMessage(QStringLiteral("Selected window: %1").arg(info->title));
+    setStatusMessage(QStringLiteral("Selected %1 source: %2").arg(info->sourceType, info->title));
     emit selectedWindowChanged();
     emit captureModeChanged();
     updatePreviewMessage();
@@ -372,8 +581,9 @@ void CaptureController::startCapture()
     }
 
     QString cropWarning;
-    const QRect crop = validatedCropRect(cropX(), cropY(), cropWidth(), cropHeight(), &cropWarning);
+    const QRect crop = validatedCropRect(0, 0, sourceWidth(), sourceHeight(), &cropWarning);
     applyCropRect(crop);
+    automaticCropRect = crop;
     if (!cropWarning.isEmpty()) {
         setWarningMessage(cropWarning);
     }
@@ -384,6 +594,8 @@ void CaptureController::startCapture()
 
     previewFrameProvider.clear();
     setHasPreviewFrame(false);
+    autoCropPending = currentSelectedSourceType == QLatin1String("Browser");
+    autoCropAttemptsRemaining = autoCropPending ? 90 : 0;
     currentFps = 0.0;
     emit fpsChanged();
     setStatusMessage(QStringLiteral("Starting capture..."));
@@ -414,6 +626,8 @@ void CaptureController::stopCapture()
     }
 
     captureStopPending = true;
+    autoCropPending = false;
+    autoCropAttemptsRemaining = 0;
     previewFrameProvider.clear();
     setHasPreviewFrame(false);
     currentFps = 0.0;
@@ -458,7 +672,8 @@ void CaptureController::startRecording()
         return;
     }
 
-    const QString filePath = FileNameUtils::uniqueRecordingFilePath(outputDirectory);
+    const QString filePrefix = recordingPrefixForSource(currentSelectedSourceType, currentSelectedWindowTitle);
+    const QString filePath = FileNameUtils::uniqueRecordingFilePath(outputDirectory, filePrefix);
 
     RecordingSettings settings;
     settings.outputDirectory = outputDirectory;
@@ -531,7 +746,93 @@ void CaptureController::setCropRect(int x, int y, int width, int height)
         }
     }
 
-    setStatusMessage(QStringLiteral("Crop: %1,%2 %3x%4").arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height()));
+    const int right = std::max(0, captureSettings.sourceGeometry.width() - rect.x() - rect.width());
+    const int bottom = std::max(0, captureSettings.sourceGeometry.height() - rect.y() - rect.height());
+    setStatusMessage(
+        QStringLiteral("Crop: left %1 right %2 top %3 bottom %4")
+            .arg(rect.x())
+            .arg(right)
+            .arg(rect.y())
+            .arg(bottom));
+    updatePreviewMessage();
+}
+
+void CaptureController::resetCropToAutoState()
+{
+    QRect target = automaticCropRect;
+    if (!target.isValid() || target.width() <= 0 || target.height() <= 0) {
+        target = QRect(0, 0, sourceWidth(), sourceHeight());
+    }
+
+    setCropRect(target.x(), target.y(), target.width(), target.height());
+}
+
+void CaptureController::tryPendingAutoCrop()
+{
+    if (!autoCropPending) {
+        return;
+    }
+    if (currentSelectedSourceType != QLatin1String("Browser")) {
+        autoCropPending = false;
+        autoCropAttemptsRemaining = 0;
+        return;
+    }
+    if (autoCropAttemptsRemaining <= 0) {
+        autoCropPending = false;
+        return;
+    }
+    if (captureStartPending || captureStopPending || !capturingActive || !previewFrameProvider.hasFrame()) {
+        return;
+    }
+
+    --autoCropAttemptsRemaining;
+    if (autoCropToVideoArea() || autoCropAttemptsRemaining <= 0) {
+        autoCropPending = false;
+    }
+}
+
+bool CaptureController::autoCropToVideoArea()
+{
+    if (captureStartPending || captureStopPending) {
+        return false;
+    }
+    if (currentSelectedWindowId == 0) {
+        return false;
+    }
+    if (!capturingActive || !previewFrameProvider.hasFrame()) {
+        return false;
+    }
+
+    const QImage frame = previewFrameProvider.currentFrame();
+    const QRect detected = detectLargeContentRect(frame);
+    if (!detected.isValid()) {
+        return false;
+    }
+
+    QRect baseCrop = captureSettings.cropRect;
+    if (!baseCrop.isValid() || baseCrop.width() <= 0 || baseCrop.height() <= 0) {
+        baseCrop = QRect(0, 0, captureSettings.sourceGeometry.width(), captureSettings.sourceGeometry.height());
+    }
+
+    const double scaleX = frame.width() > 0 ? static_cast<double>(baseCrop.width()) / frame.width() : 1.0;
+    const double scaleY = frame.height() > 0 ? static_cast<double>(baseCrop.height()) / frame.height() : 1.0;
+    const QRect target(
+        baseCrop.x() + static_cast<int>(std::round(detected.x() * scaleX)),
+        baseCrop.y() + static_cast<int>(std::round(detected.y() * scaleY)),
+        static_cast<int>(std::round(detected.width() * scaleX)),
+        static_cast<int>(std::round(detected.height() * scaleY)));
+
+    QString warning;
+    automaticCropRect = validatedCropRect(target.x(), target.y(), target.width(), target.height(), &warning);
+    setStatusMessage(QStringLiteral("Auto crop: %1,%2 %3x%4").arg(target.x()).arg(target.y()).arg(target.width()).arg(target.height()));
+    setCropRect(automaticCropRect.x(), automaticCropRect.y(), automaticCropRect.width(), automaticCropRect.height());
+    return true;
+}
+
+void CaptureController::dismissCurrentMessage()
+{
+    setWarningMessage(QString());
+    setStatusMessage(QString());
     updatePreviewMessage();
 }
 
@@ -573,7 +874,7 @@ void CaptureController::switchToScreenRegionFallback()
     emit captureModeChanged();
 
     const QString fallbackWarning = QStringLiteral(
-        "Fallback captures visible screen pixels. If another window covers Meet, it will be captured too.");
+        "Fallback captures visible screen pixels. If another window covers the selected video region, it will be captured too.");
     setWarningMessage(fallbackWarning);
 
     if (capturingActive) {
@@ -604,6 +905,8 @@ void CaptureController::rebuildWindowVariantList()
         QVariantMap item;
         item.insert(QStringLiteral("display"), displayTitle(info));
         item.insert(QStringLiteral("title"), info.title);
+        item.insert(QStringLiteral("sourceType"), info.sourceType);
+        item.insert(QStringLiteral("sourceHint"), info.sourceHint);
         item.insert(QStringLiteral("className"), info.className);
         item.insert(QStringLiteral("xid"), QVariant::fromValue<qulonglong>(static_cast<qulonglong>(info.xid)));
         item.insert(QStringLiteral("xidText"), xidString(info.xid));
@@ -676,8 +979,8 @@ void CaptureController::updatePreviewMessage()
         setPreviewMessage(QStringLiteral("Capture is not running"));
     } else if (!previewFrameAvailable) {
         setPreviewMessage(QStringLiteral("Waiting for frames..."));
-    } else if (currentWarningMessage == QStringLiteral("Window capture may be black or stale")) {
-        setPreviewMessage(QStringLiteral("Window capture may be black or stale"));
+    } else if (currentWarningMessage == blackCaptureWarning()) {
+        setPreviewMessage(blackCaptureWarning());
     } else {
         setPreviewMessage(QString());
     }
@@ -706,6 +1009,7 @@ void CaptureController::handleWindowsReady(int requestId, const QVector<X11Windo
         } else {
             currentSelectedWindowId = 0;
             currentSelectedWindowTitle.clear();
+            currentSelectedSourceType = QStringLiteral("Window");
             setStatusMessage(QStringLiteral("Previously selected window is no longer available"));
             emit selectedWindowChanged();
             updatePreviewMessage();
@@ -747,9 +1051,24 @@ void CaptureController::handleCaptureCommandSucceeded(quint64 commandId)
 
 void CaptureController::updateSourceFromSelectedWindow(const X11WindowInfo& info)
 {
+    const bool selectedMetadataChanged = currentSelectedWindowTitle != info.title
+        || currentSelectedSourceType != info.sourceType;
+    const bool selectedSourceChanged = captureSettings.windowId != info.xid
+        || captureSettings.sourceGeometry != info.geometry
+        || captureSettings.sourceCaptureOffset != info.captureOffset;
+
+    currentSelectedWindowTitle = info.title;
+    currentSelectedSourceType = info.sourceType;
     captureSettings.windowId = info.xid;
     captureSettings.windowTitle = info.title;
     captureSettings.sourceGeometry = info.geometry;
+    captureSettings.sourceCaptureOffset = info.captureOffset;
+    if (selectedSourceChanged) {
+        automaticCropRect = QRect();
+    }
+    if (selectedMetadataChanged) {
+        emit selectedWindowChanged();
+    }
     emit sourceGeometryChanged();
 }
 
@@ -763,31 +1082,47 @@ QRect CaptureController::validatedCropRect(int x, int y, int width, int height, 
         return QRect(0, 0, 0, 0);
     }
 
-    // Keep the crop valid for videocrop and encoders. Tiny or out-of-bounds
-    // rectangles are clamped instead of failing the capture session.
+    // Keep the crop valid for videocrop and H.264/I420 encoding. Tiny or
+    // out-of-bounds rectangles are clamped; odd sizes are rounded down because
+    // x264 cannot reliably encode 4:2:0 frames with odd dimensions.
     constexpr int minimumSize = 64;
     QRect requested(x, y, width, height);
-    QRect clamped = requested;
+    QRect bounded = requested;
 
-    clamped.setX(std::max(0, clamped.x()));
-    clamped.setY(std::max(0, clamped.y()));
-    clamped.setWidth(std::max(minimumSize, clamped.width()));
-    clamped.setHeight(std::max(minimumSize, clamped.height()));
+    bounded.setX(std::max(0, bounded.x()));
+    bounded.setY(std::max(0, bounded.y()));
+    bounded.setWidth(std::max(minimumSize, bounded.width()));
+    bounded.setHeight(std::max(minimumSize, bounded.height()));
 
-    if (clamped.width() > source.width()) {
-        clamped.setWidth(source.width());
+    if (bounded.width() > source.width()) {
+        bounded.setWidth(source.width());
     }
-    if (clamped.height() > source.height()) {
-        clamped.setHeight(source.height());
+    if (bounded.height() > source.height()) {
+        bounded.setHeight(source.height());
     }
-    if (clamped.x() + clamped.width() > source.width()) {
-        clamped.moveLeft(std::max(0, source.width() - clamped.width()));
+    if (bounded.x() + bounded.width() > source.width()) {
+        bounded.moveLeft(std::max(0, source.width() - bounded.width()));
     }
-    if (clamped.y() + clamped.height() > source.height()) {
-        clamped.moveTop(std::max(0, source.height() - clamped.height()));
+    if (bounded.y() + bounded.height() > source.height()) {
+        bounded.moveTop(std::max(0, source.height() - bounded.height()));
     }
 
-    if (warningMessage && clamped != requested) {
+    const int minimumEvenWidth = source.width() >= minimumSize
+        ? minimumSize
+        : std::max(2, source.width() - source.width() % 2);
+    const int minimumEvenHeight = source.height() >= minimumSize
+        ? minimumSize
+        : std::max(2, source.height() - source.height() % 2);
+
+    QRect clamped = bounded;
+    if (clamped.width() % 2 != 0) {
+        clamped.setWidth(std::max(minimumEvenWidth, clamped.width() - 1));
+    }
+    if (clamped.height() % 2 != 0) {
+        clamped.setHeight(std::max(minimumEvenHeight, clamped.height() - 1));
+    }
+
+    if (warningMessage && bounded != requested) {
         *warningMessage = QStringLiteral("Crop rectangle was clamped to fit inside the source window.");
     }
 

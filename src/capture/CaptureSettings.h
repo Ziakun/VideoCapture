@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMetaType>
+#include <QPoint>
 #include <QRect>
 #include <QString>
 
@@ -11,13 +12,14 @@ enum class CaptureMode {
 
 // Immutable input settings for one capture pipeline run.
 //
-// cropRect is always relative to the selected browser window. fallbackScreenRect
+// cropRect is always relative to the selected source window. fallbackScreenRect
 // is absolute screen coordinates and is used only by ScreenRegionFallback.
 struct CaptureSettings {
     CaptureMode mode = CaptureMode::X11WindowById;
     quint64 windowId = 0;
     QString windowTitle;
     QRect sourceGeometry;
+    QPoint sourceCaptureOffset;
     QRect cropRect;
     QRect fallbackScreenRect;
     int fps = 30;

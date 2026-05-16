@@ -96,13 +96,46 @@ Item {
         }
     }
 
-    ToolTip.visible: recording && mouseArea.containsMouse && filePath.length > 0
-    ToolTip.text: filePath
-
     MouseArea {
         id: mouseArea
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
+        onContainsMouseChanged: {
+            if (containsMouse && root.recording && root.filePath.length > 0) {
+                toolTipHideTimer.restart()
+                timerToolTip.open()
+            } else {
+                toolTipHideTimer.stop()
+                timerToolTip.close()
+            }
+        }
+    }
+
+    Timer {
+        id: toolTipHideTimer
+        interval: 10000
+        repeat: false
+        onTriggered: timerToolTip.close()
+    }
+
+    ToolTip {
+        id: timerToolTip
+        text: root.filePath
+        y: root.height + 8
+        padding: 8
+        contentItem: Text {
+            text: timerToolTip.text
+            color: "#f8fafc"
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            width: Math.min(620, implicitWidth)
+        }
+        background: Rectangle {
+            radius: 6
+            color: "#111827"
+            border.color: "#334155"
+            border.width: 1
+        }
     }
 }

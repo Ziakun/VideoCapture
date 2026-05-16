@@ -27,6 +27,7 @@ RowLayout {
     ControlButton {
         Layout.preferredWidth: 138
         text: "Refresh Windows"
+        textPixelSize: 12
         accentColor: "#2dd4bf"
         baseColor: "#182532"
         onClicked: root.refreshRequested()
@@ -42,7 +43,7 @@ RowLayout {
         valueRole: "xid"
         currentIndex: -1
         displayText: currentIndex >= 0 && root.windows[currentIndex]
-            ? root.windows[currentIndex].title + "  " + root.windows[currentIndex].xidText
+            ? "[" + root.windows[currentIndex].sourceType + "] " + root.windows[currentIndex].title + "  " + root.windows[currentIndex].xidText
             : "Select window"
 
         contentItem: Text {
@@ -52,7 +53,7 @@ RowLayout {
             color: combo.enabled ? "#f8fafc" : "#7c8796"
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
-            font.pixelSize: 13
+            font.pixelSize: 12
             font.bold: combo.currentIndex >= 0
         }
 
@@ -101,17 +102,40 @@ RowLayout {
                     anchors.rightMargin: 10
                     spacing: 2
 
-                    Text {
+                    Row {
                         width: parent.width
-                        text: itemData.title || ""
-                        color: "#eef2f7"
-                        elide: Text.ElideRight
-                        font.pixelSize: 13
+                        spacing: 8
+
+                        Rectangle {
+                            width: Math.max(56, sourceTypeText.implicitWidth + 16)
+                            height: 20
+                            radius: 10
+                            color: itemData.sourceType === "Zoom" ? "#18345f" : (itemData.sourceType === "Browser" ? "#153226" : "#253142")
+                            border.color: itemData.sourceType === "Zoom" ? "#60a5fa" : (itemData.sourceType === "Browser" ? "#34d399" : "#64748b")
+
+                            Text {
+                                id: sourceTypeText
+                                anchors.centerIn: parent
+                                text: itemData.sourceType || "Window"
+                                color: "#f8fafc"
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+                        }
+
+                        Text {
+                            width: parent.width - 72
+                            text: itemData.title || ""
+                            color: "#eef2f7"
+                            elide: Text.ElideRight
+                            font.pixelSize: 13
+                            font.bold: itemData.sourceType === "Zoom"
+                        }
                     }
 
                     Text {
                         width: parent.width
-                        text: (itemData.className || "-") + " | " + (itemData.xidText || "-") + " | " + (itemData.geometry || "-") + " | pid " + (itemData.pid || "-")
+                        text: (itemData.sourceHint || itemData.className || "-") + " | " + (itemData.className || "-") + " | " + (itemData.xidText || "-") + " | " + (itemData.geometry || "-") + " | pid " + (itemData.pid || "-")
                         color: "#aab3c0"
                         elide: Text.ElideRight
                         font.pixelSize: 11

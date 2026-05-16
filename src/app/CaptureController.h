@@ -13,7 +13,7 @@
 
 // QML-facing orchestration layer.
 //
-// This class keeps browser-window selection, crop settings, capture state,
+// This class keeps source-window selection, crop settings, capture state,
 // recording state, status messages, and timers in one Qt-friendly API. It
 // deliberately does not implement X11, GStreamer, or recording internals; those
 // stay in their dedicated backend classes.
@@ -27,6 +27,7 @@ class CaptureController : public QObject {
     Q_PROPERTY(bool hasPreviewFrame READ hasPreviewFrame NOTIFY hasPreviewFrameChanged)
     Q_PROPERTY(QString selectedWindowTitle READ selectedWindowTitle NOTIFY selectedWindowChanged)
     Q_PROPERTY(qulonglong selectedWindowId READ selectedWindowId NOTIFY selectedWindowChanged)
+    Q_PROPERTY(QString selectedSourceType READ selectedSourceType NOTIFY selectedWindowChanged)
     Q_PROPERTY(QString outputFilePath READ outputFilePath NOTIFY outputFilePathChanged)
     Q_PROPERTY(int recordingSeconds READ recordingSeconds NOTIFY recordingSecondsChanged)
     Q_PROPERTY(QString recordingTimeText READ recordingTimeText NOTIFY recordingSecondsChanged)
@@ -54,6 +55,7 @@ public:
     bool hasPreviewFrame() const;
     QString selectedWindowTitle() const;
     qulonglong selectedWindowId() const;
+    QString selectedSourceType() const;
     QString outputFilePath() const;
     int recordingSeconds() const;
     QString recordingTimeText() const;
@@ -78,7 +80,9 @@ public:
     Q_INVOKABLE void startRecording();
     Q_INVOKABLE void stopRecording();
     Q_INVOKABLE void setCropRect(int x, int y, int width, int height);
+    Q_INVOKABLE void resetCropToAutoState();
     Q_INVOKABLE void chooseOutputDirectory(const QString& path);
+    Q_INVOKABLE void dismissCurrentMessage();
     Q_INVOKABLE void switchToScreenRegionFallback();
 
 signals:
@@ -107,6 +111,8 @@ private:
     void setWarningMessage(const QString& message);
     void setPreviewMessage(const QString& message);
     void updatePreviewMessage();
+    bool autoCropToVideoArea();
+    void tryPendingAutoCrop();
     void handleWindowsReady(int requestId, const QVector<X11WindowInfo>& windows, const QString& error);
     void handleCaptureCommandFailed(quint64 commandId, const QString& error);
     void handleCaptureCommandSucceeded(quint64 commandId);
@@ -132,6 +138,7 @@ private:
     QMetaObject::Connection recorderFrameConnection;
 
     CaptureSettings captureSettings;
+    QRect automaticCropRect;
     QTimer recordingTimer;
 
     bool capturingActive = false;
@@ -139,10 +146,13 @@ private:
     bool previewFrameAvailable = false;
     bool captureStartPending = false;
     bool captureStopPending = false;
+    bool autoCropPending = false;
+    int autoCropAttemptsRemaining = 0;
     int latestWindowRefreshRequestId = 0;
     quint64 nextCaptureCommandSequence = 0;
 
     QString currentSelectedWindowTitle;
+    QString currentSelectedSourceType = QStringLiteral("Window");
     quint64 currentSelectedWindowId = 0;
     QString outputDirectory;
     QString currentOutputFilePath;

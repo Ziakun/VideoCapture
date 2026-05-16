@@ -12,6 +12,7 @@ Rectangle {
     property bool monospaced: false
     property bool active: false
     property bool pulse: false
+    property string toolTipText: label.length > 0 ? label + ": " + value : value
 
     implicitHeight: 34
     radius: 8
@@ -63,5 +64,48 @@ Rectangle {
 
     Behavior on border.color {
         ColorAnimation { duration: 160 }
+    }
+
+    MouseArea {
+        id: hoverArea
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+        onContainsMouseChanged: {
+            if (containsMouse && root.toolTipText.length > 0) {
+                toolTipHideTimer.restart()
+                chipToolTip.open()
+            } else {
+                toolTipHideTimer.stop()
+                chipToolTip.close()
+            }
+        }
+    }
+
+    Timer {
+        id: toolTipHideTimer
+        interval: 10000
+        repeat: false
+        onTriggered: chipToolTip.close()
+    }
+
+    ToolTip {
+        id: chipToolTip
+        text: root.toolTipText
+        y: -implicitHeight - 8
+        padding: 8
+        contentItem: Text {
+            text: chipToolTip.text
+            color: "#f8fafc"
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            width: Math.min(560, implicitWidth)
+        }
+        background: Rectangle {
+            radius: 6
+            color: "#111827"
+            border.color: "#334155"
+            border.width: 1
+        }
     }
 }

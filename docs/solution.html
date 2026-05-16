@@ -166,22 +166,22 @@
     <section class="hero">
       <h1>MeetVideoCapture: техническое решение</h1>
       <p class="subtitle">
-        Приложение захватывает уже отрисованное видео Google Meet из окна браузера на Ubuntu X11,
-        показывает crop в Qt/QML preview и по кнопке пишет его в MKV/H.264.
+        Приложение захватывает уже отрисованное видео Google Meet или Zoom Desktop из top-level
+        X11 окна, показывает crop в Qt/QML preview и по кнопке пишет его в MKV/H.264.
       </p>
       <span class="tagline">Qt 6 / C++ / QML</span>
       <span class="tagline">X11 window capture</span>
       <span class="tagline">GStreamer</span>
-      <span class="tagline">No browser hacking</span>
+      <span class="tagline">No browser / Zoom hacking</span>
     </section>
 
     <section class="grid">
       <div class="card ok">
         <strong>Что делаем</strong>
         <ul>
-          <li>Находим top-level окно браузера через X11.</li>
+          <li>Находим top-level окно Meet/Zoom/source app через X11.</li>
           <li>Захватываем pixels этого окна по <code>XID</code>.</li>
-          <li>Обрезаем область Meet video внутри окна.</li>
+          <li>Обрезаем область meeting video внутри окна.</li>
           <li>Показываем только crop и, при необходимости, пишем файл.</li>
         </ul>
       </div>
@@ -191,6 +191,7 @@
           <li>Не перехватываем внутренний <code>WebRTC MediaStream</code>.</li>
           <li>Не вытаскиваем <code>VideoTrack</code> из браузера.</li>
           <li>Не используем tab capture API и Chrome extension.</li>
+          <li>Не используем Zoom SDK для извлечения media stream.</li>
           <li>Не используем Selenium/CDP/injection/packet sniffing.</li>
         </ul>
       </div>
@@ -198,18 +199,18 @@
 
     <h2>1. Основная идея</h2>
     <p>
-      Google Meet уже декодирует WebRTC-видео и рисует его в окне браузера. Поэтому backend
-      работает ниже уровня браузера: он берет готовую картинку окна из X11. Для приложения это
-      обычный поток raw video frames, а не WebRTC stream.
+      Google Meet в браузере и Zoom Desktop уже декодируют видео и рисуют его в своем top-level
+      окне. Поэтому backend работает ниже уровня приложения: он берет готовую картинку окна из
+      X11. Для Meet это не WebRTC stream, а для Zoom это не внутренний media stream Zoom.
     </p>
 
-    <div class="diagram">Google Meet в браузере
+    <div class="diagram">Google Meet в браузере или Zoom Desktop
     ↓
-браузер декодирует WebRTC и рисует видео
+source app декодирует и рисует видео
     ↓
-X11 capture top-level browser window by XID
+X11 capture top-level source window by XID
     ↓
-crop области Meet video относительно окна браузера
+crop области meeting video относительно source window
     ↓
 Qt/QML preview latest frame
     ↓
@@ -218,10 +219,11 @@ optional MKV/H.264 recording</div>
     <h2>2. Захват окна</h2>
     <p>
       <code>X11WindowFinder</code> читает список top-level окон, получает title, className,
-      XID, geometry и PID. Браузеры сортируются выше остальных, но выбрать можно любое окно.
-      После выбора controller передает XID и geometry в capture settings.
+      XID, geometry, PID и source profile. Zoom meeting windows и browser meeting windows
+      сортируются выше остальных, но выбрать можно любое top-level окно. После выбора controller
+      передает XID и geometry в capture settings.
     </p>
-    <div class="pipeline">ximagesrc xid=&lt;browserWindowId&gt; use-damage=false show-pointer=false
+    <div class="pipeline">ximagesrc xid=&lt;sourceWindowId&gt; use-damage=false show-pointer=false
   ! video/x-raw,framerate=30/1
   ! videocrop left=&lt;l&gt; top=&lt;t&gt; right=&lt;r&gt; bottom=&lt;b&gt;
   ! videoconvert
@@ -264,7 +266,7 @@ bottom = sourceHeight - cropY - cropHeight</div>
   ! x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=2500
   ! h264parse
   ! matroskamux
-  ! filesink location=&lt;meet-recording-YYYYMMDD-HHMMSS.mkv&gt;</div>
+  ! filesink location=&lt;source-profile-recording-YYYYMMDD-HHMMSS.mkv&gt;</div>
     <p>
       Формат по умолчанию - MKV/H.264. MKV выбран потому, что он надежнее для live recording:
       при аварийном завершении меньше риск получить полностью непригодный файл, чем с MP4.
@@ -305,15 +307,15 @@ bottom = sourceHeight - cropY - cropHeight</div>
       по координатам crop. Это не tab capture и не extension: это захват pixels экрана.
     </p>
     <p class="muted">
-      Ограничение fallback: если поверх Meet окажется другое окно, оно тоже попадет в capture.
+      Ограничение fallback: если поверх выбранной video region окажется другое окно, оно тоже попадет в capture.
     </p>
 
     <h2>7. Ограничения MVP</h2>
     <ul>
       <li>Только Ubuntu X11. Wayland/PipeWire portal можно добавить отдельным backend позже.</li>
-      <li>Свернутое или скрытое окно браузера может не рендериться.</li>
-      <li>XID capture зависит от compositor/GPU/browser и иногда может быть black/stale.</li>
-      <li>Crop задается численно относительно окна браузера; визуальный overlay можно добавить позже.</li>
+      <li>Свернутое или скрытое окно Meet/Zoom/source app может не рендериться.</li>
+      <li>XID capture зависит от compositor/GPU/source app и иногда может быть black/stale.</li>
+      <li>Crop задается численно относительно source window; визуальный overlay можно добавить позже.</li>
     </ul>
 
     <h2>8. Дальнейшее расширение на Windows и macOS</h2>
@@ -395,8 +397,9 @@ preview / analysis / recorder</div>
     </p>
 
     <div class="footer">
-      Итог: MeetVideoCapture не взламывает браузер и не трогает WebRTC. Он захватывает то, что браузер уже
-      отрисовал в X11-окне, обрезает нужную область и передает ее в быстрый preview и recorder.
+      Итог: MeetVideoCapture не взламывает браузер, не трогает WebRTC и не извлекает внутренний
+      media stream Zoom. Он захватывает то, что source app уже отрисовал в X11-окне, обрезает
+      нужную область и передает ее в быстрый preview и recorder.
     </div>
   </main>
 </body>

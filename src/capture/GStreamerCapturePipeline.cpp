@@ -269,6 +269,10 @@ QString GStreamerCapturePipeline::buildX11WindowPipelineDescription(const Captur
     const QRect crop = settings.cropRect;
     const int sourceWidth = settings.sourceGeometry.width();
     const int sourceHeight = settings.sourceGeometry.height();
+    const int sourceStartX = nonNegative(settings.sourceCaptureOffset.x());
+    const int sourceStartY = nonNegative(settings.sourceCaptureOffset.y());
+    const int sourceEndX = sourceStartX + std::max(1, sourceWidth) - 1;
+    const int sourceEndY = sourceStartY + std::max(1, sourceHeight) - 1;
     const int left = nonNegative(crop.x());
     const int top = nonNegative(crop.y());
     const int right = nonNegative(sourceWidth - crop.x() - crop.width());
@@ -277,14 +281,18 @@ QString GStreamerCapturePipeline::buildX11WindowPipelineDescription(const Captur
     // appsink and queue are configured for latest-frame behavior. If the UI
     // falls behind, old preview frames are dropped instead of accumulating.
     return QStringLiteral(
-               "ximagesrc xid=%1 use-damage=false show-pointer=%2 "
-               "! video/x-raw,framerate=%3/1 "
-               "! videocrop name=cropper left=%4 top=%5 right=%6 bottom=%7 "
+               "ximagesrc xid=%1 startx=%2 starty=%3 endx=%4 endy=%5 use-damage=false show-pointer=%6 "
+               "! video/x-raw,framerate=%7/1 "
+               "! videocrop name=cropper left=%8 top=%9 right=%10 bottom=%11 "
                "! videoconvert "
                "! video/x-raw,format=BGRA "
                "! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 max-size-time=0 "
                "! appsink name=previewSink emit-signals=true sync=false max-buffers=1 drop=true")
         .arg(settings.windowId)
+        .arg(sourceStartX)
+        .arg(sourceStartY)
+        .arg(sourceEndX)
+        .arg(sourceEndY)
         .arg(boolString(settings.showCursor))
         .arg(settings.fps)
         .arg(left)
@@ -496,9 +504,6 @@ void GStreamerCapturePipeline::updateStatsAndWarnings(const FrameAnalysis& analy
         if (staleConsecutiveFrames >= std::max(1, captureSettings.fps) * 4 && !staleWarningActive) {
             staleWarningActive = true;
             shouldEmitStale = true;
-            if (warning.isEmpty()) {
-                warning = QStringLiteral("Window capture may be black or stale");
-            }
         }
 
         const qint64 elapsedMs = fpsTimer.elapsed();

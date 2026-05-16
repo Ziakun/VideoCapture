@@ -3,6 +3,8 @@
 #include "utils/Logging.h"
 
 #include <QByteArray>
+#include <QPoint>
+#include <QRect>
 #include <QSet>
 #include <QStringList>
 
@@ -149,7 +151,12 @@ qint64 readPid(Display* display, Window window)
     return pid;
 }
 
-QRect readGeometry(Display* display, Window window, bool* isMapped, bool* isVisible)
+struct WindowGeometry {
+    QRect visibleRect;
+    QPoint captureOffset;
+};
+
+WindowGeometry readGeometry(Display* display, Window window, bool* isMapped, bool* isVisible)
 {
     XWindowAttributes attributes;
     if (XGetWindowAttributes(display, window, &attributes) == 0) {
@@ -164,9 +171,6 @@ QRect readGeometry(Display* display, Window window, bool* isMapped, bool* isVisi
 
     if (isMapped) {
         *isMapped = attributes.map_state != IsUnmapped;
-    }
-    if (isVisible) {
-        *isVisible = attributes.map_state == IsViewable && attributes.width > 0 && attributes.height > 0;
     }
 
     Window child = None;
@@ -186,7 +190,22 @@ QRect readGeometry(Display* display, Window window, bool* isMapped, bool* isVisi
         rootY = attributes.y;
     }
 
-    return QRect(rootX, rootY, attributes.width, attributes.height);
+    const QRect windowRect(rootX, rootY, attributes.width, attributes.height);
+    const QRect rootRect(
+        0,
+        0,
+        DisplayWidth(display, DefaultScreen(display)),
+        DisplayHeight(display, DefaultScreen(display)));
+    const QRect visibleRect = windowRect.intersected(rootRect);
+
+    if (isVisible) {
+        *isVisible = attributes.map_state == IsViewable && visibleRect.width() > 0 && visibleRect.height() > 0;
+    }
+
+    WindowGeometry geometry;
+    geometry.visibleRect = visibleRect;
+    geometry.captureOffset = QPoint(visibleRect.x() - windowRect.x(), visibleRect.y() - windowRect.y());
+    return geometry;
 }
 
 QVector<Window> readClientList(Display* display)
@@ -260,11 +279,33 @@ QVector<Window> readRootChildren(Display* display)
     return windows;
 }
 
-int browserPriority(const X11WindowInfo& info)
+struct WindowClassification {
+    QString sourceType = QStringLiteral("Window");
+    QString sourceHint;
+    int sortPriority = 1000;
+};
+
+WindowClassification classifyWindow(const QString& title, const QString& className)
 {
-    // Browser-like windows are sorted first for convenience, but the caller
-    // still receives all valid top-level windows.
-    const QString haystack = (info.className + QLatin1Char(' ') + info.title).toLower();
+    // Meeting windows are sorted first for convenience, but the caller still
+    // receives all valid top-level windows. Classification is only a hint; the
+    // capture backend remains generic X11 window capture by XID.
+    const QString titleLower = title.toLower();
+    const QString classLower = className.toLower();
+    const QString haystack = classLower + QLatin1Char(' ') + titleLower;
+
+    if (haystack.contains(QStringLiteral("zoom"))) {
+        WindowClassification classification;
+        classification.sourceType = QStringLiteral("Zoom");
+        classification.sourceHint = QStringLiteral("Zoom desktop app window");
+        classification.sortPriority = titleLower.contains(QStringLiteral("meeting"))
+                || titleLower.contains(QStringLiteral("conference"))
+                || titleLower.contains(QStringLiteral("zoom meeting"))
+            ? 0
+            : 20;
+        return classification;
+    }
+
     static const QStringList browserTokens = {
         QStringLiteral("firefox"),
         QStringLiteral("google-chrome"),
@@ -277,10 +318,19 @@ int browserPriority(const X11WindowInfo& info)
 
     for (int i = 0; i < browserTokens.size(); ++i) {
         if (haystack.contains(browserTokens.at(i))) {
-            return i;
+            WindowClassification classification;
+            classification.sourceType = QStringLiteral("Browser");
+            classification.sourceHint = QStringLiteral("Browser-rendered meeting window");
+            classification.sortPriority = titleLower.contains(QStringLiteral("google meet"))
+                    || titleLower.contains(QStringLiteral("meet.google"))
+                    || titleLower.contains(QStringLiteral("meet -"))
+                ? 40 + i
+                : 100 + i;
+            return classification;
         }
     }
-    return 1000;
+
+    return {};
 }
 
 QString fallbackTitle(const QString& title, const QString& className, quint64 xid)
@@ -324,8 +374,8 @@ QVector<X11WindowInfo> X11WindowFinder::listWindows(QString* errorMessage) const
 
         bool isMapped = false;
         bool isVisible = false;
-        const QRect geometry = readGeometry(display, window, &isMapped, &isVisible);
-        if (!isMapped || geometry.width() < 64 || geometry.height() < 64) {
+        const WindowGeometry geometry = readGeometry(display, window, &isMapped, &isVisible);
+        if (!isMapped || geometry.visibleRect.width() < 64 || geometry.visibleRect.height() < 64) {
             continue;
         }
 
@@ -333,8 +383,13 @@ QVector<X11WindowInfo> X11WindowFinder::listWindows(QString* errorMessage) const
         info.xid = xid;
         info.title = readWindowTitle(display, window);
         info.className = readClassName(display, window);
+        const WindowClassification classification = classifyWindow(info.title, info.className);
+        info.sourceType = classification.sourceType;
+        info.sourceHint = classification.sourceHint;
+        info.sortPriority = classification.sortPriority;
         info.pid = readPid(display, window);
-        info.geometry = geometry;
+        info.geometry = geometry.visibleRect;
+        info.captureOffset = geometry.captureOffset;
         info.isMapped = isMapped;
         info.isVisible = isVisible;
 
@@ -349,10 +404,8 @@ QVector<X11WindowInfo> X11WindowFinder::listWindows(QString* errorMessage) const
     XCloseDisplay(display);
 
     std::sort(windows.begin(), windows.end(), [](const X11WindowInfo& left, const X11WindowInfo& right) {
-        const int leftBrowserPriority = browserPriority(left);
-        const int rightBrowserPriority = browserPriority(right);
-        if (leftBrowserPriority != rightBrowserPriority) {
-            return leftBrowserPriority < rightBrowserPriority;
+        if (left.sortPriority != right.sortPriority) {
+            return left.sortPriority < right.sortPriority;
         }
         if (left.isVisible != right.isVisible) {
             return left.isVisible;

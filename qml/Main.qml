@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 980
     minimumHeight: 620
     visible: true
-    title: "MeetVideoCapture"
+    title: "Video Capture"
     color: "#0b0f14"
 
     header: ToolBar {
@@ -62,6 +62,7 @@ ApplicationWindow {
             ControlButton {
                 Layout.preferredWidth: 116
                 text: captureController.isCapturing ? "Stop Capture" : "Start Capture"
+                textPixelSize: 12
                 accentColor: captureController.isCapturing ? "#f97316" : "#34d399"
                 baseColor: captureController.isCapturing ? "#3a2419" : "#163228"
                 onClicked: captureController.isCapturing ? captureController.stopCapture() : captureController.startCapture()
@@ -70,12 +71,12 @@ ApplicationWindow {
             ControlButton {
                 Layout.preferredWidth: 94
                 text: "Fallback"
+                textPixelSize: 12
+                toolTipText: "Use visible screen region capture"
                 accentColor: "#38bdf8"
                 baseColor: "#172b3b"
                 enabled: captureController.selectedWindowId !== 0
                 onClicked: captureController.switchToScreenRegionFallback()
-                ToolTip.visible: hovered
-                ToolTip.text: "Use visible screen region capture"
             }
 
             RecordButton {
@@ -108,6 +109,7 @@ ApplicationWindow {
             captureRunning: captureController.isCapturing
             fps: captureController.fps
             outputFilePath: captureController.outputFilePath
+            onDismissMessageRequested: captureController.dismissCurrentMessage()
         }
 
         CropControls {
@@ -126,7 +128,7 @@ ApplicationWindow {
                 captureController.setCropRect(x, y, w, h)
             }
             onResetCrop: {
-                captureController.setCropRect(0, 0, captureController.sourceWidth, captureController.sourceHeight)
+                captureController.resetCropToAutoState()
             }
         }
     }
@@ -134,15 +136,19 @@ ApplicationWindow {
     footer: StatusBar {
         selectedWindowTitle: captureController.selectedWindowTitle
         selectedWindowId: captureController.selectedWindowId
+        selectedSourceType: captureController.selectedSourceType
         captureModeText: captureController.captureModeText
         cropX: captureController.cropX
         cropY: captureController.cropY
         cropWidth: captureController.cropWidth
         cropHeight: captureController.cropHeight
+        sourceWidth: captureController.sourceWidth
+        sourceHeight: captureController.sourceHeight
         fps: captureController.fps
         isRecording: captureController.isRecording
         outputFilePath: captureController.outputFilePath
         warningMessage: captureController.warningMessage
         statusMessage: captureController.statusMessage
+        onDismissMessageRequested: captureController.dismissCurrentMessage()
     }
 }

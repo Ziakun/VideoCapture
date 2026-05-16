@@ -25,19 +25,113 @@ Rectangle {
         : 0
     readonly property real mapWidth: Math.max(1, sourceWidth * mapScale)
     readonly property real mapHeight: Math.max(1, sourceHeight * mapScale)
+    readonly property int minimumCropSize: 64
+    property bool syncing: false
 
     function syncValues() {
-        xSpin.value = cropX
-        ySpin.value = cropY
-        wSpin.value = cropWidth
-        hSpin.value = cropHeight
+        syncing = true
+        leftSlider.value = Math.max(0, cropX)
+        rightSlider.value = Math.max(0, sourceWidth - cropX - cropWidth)
+        topSlider.value = Math.max(0, cropY)
+        bottomSlider.value = Math.max(0, sourceHeight - cropY - cropHeight)
+        syncing = false
+    }
+
+    function rounded(value) {
+        return Math.round(value)
+    }
+
+    function clamped(value, minimum, maximum) {
+        return Math.max(minimum, Math.min(maximum, value))
+    }
+
+    function horizontalLimit() {
+        return Math.max(0, root.sourceWidth - root.minimumCropSize)
+    }
+
+    function verticalLimit() {
+        return Math.max(0, root.sourceHeight - root.minimumCropSize)
+    }
+
+    function clampActiveSlider(edge) {
+        if (syncing) {
+            return
+        }
+
+        if (edge === "left") {
+            leftSlider.value = root.clamped(root.rounded(leftSlider.value), 0, Math.max(0, root.horizontalLimit() - root.rounded(rightSlider.value)))
+        } else if (edge === "right") {
+            rightSlider.value = root.clamped(root.rounded(rightSlider.value), 0, Math.max(0, root.horizontalLimit() - root.rounded(leftSlider.value)))
+        } else if (edge === "top") {
+            topSlider.value = root.clamped(root.rounded(topSlider.value), 0, Math.max(0, root.verticalLimit() - root.rounded(bottomSlider.value)))
+        } else if (edge === "bottom") {
+            bottomSlider.value = root.clamped(root.rounded(bottomSlider.value), 0, Math.max(0, root.verticalLimit() - root.rounded(topSlider.value)))
+        }
+    }
+
+    function effectiveCuts() {
+        var horizontalLimit = root.horizontalLimit()
+        var verticalLimit = root.verticalLimit()
+        var left = root.clamped(root.rounded(leftSlider.value), 0, horizontalLimit)
+        var right = root.clamped(root.rounded(rightSlider.value), 0, horizontalLimit)
+        var top = root.clamped(root.rounded(topSlider.value), 0, verticalLimit)
+        var bottom = root.clamped(root.rounded(bottomSlider.value), 0, verticalLimit)
+
+        if (left + right > horizontalLimit) {
+            if (leftSlider.pressed) {
+                left = Math.max(0, horizontalLimit - right)
+            } else if (rightSlider.pressed) {
+                right = Math.max(0, horizontalLimit - left)
+            } else {
+                left = Math.max(0, horizontalLimit - right)
+            }
+        }
+        if (top + bottom > verticalLimit) {
+            if (topSlider.pressed) {
+                top = Math.max(0, verticalLimit - bottom)
+            } else if (bottomSlider.pressed) {
+                bottom = Math.max(0, verticalLimit - top)
+            } else {
+                top = Math.max(0, verticalLimit - bottom)
+            }
+        }
+
+        return { "left": left, "right": right, "top": top, "bottom": bottom }
+    }
+
+    function scheduleApply() {
+        if (syncing || root.sourceWidth <= 0 || root.sourceHeight <= 0) {
+            return
+        }
+        applyTimer.restart()
+    }
+
+    function applySliderCrop() {
+        if (syncing || root.sourceWidth <= 0 || root.sourceHeight <= 0) {
+            return
+        }
+        var cuts = root.effectiveCuts()
+        root.applyCrop(
+            cuts.left,
+            cuts.top,
+            root.sourceWidth - cuts.left - cuts.right,
+            root.sourceHeight - cuts.top - cuts.bottom)
     }
 
     onCropXChanged: syncValues()
     onCropYChanged: syncValues()
     onCropWidthChanged: syncValues()
     onCropHeightChanged: syncValues()
+    onSourceWidthChanged: syncValues()
+    onSourceHeightChanged: syncValues()
     Component.onCompleted: syncValues()
+
+    Timer {
+        id: applyTimer
+        interval: 80
+        repeat: false
+        onTriggered: root.applySliderCrop()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -115,11 +209,51 @@ Rectangle {
                 }
 
                 Rectangle {
+                    id: leftCutPreview
+                    x: 0
+                    y: 0
+                    width: root.effectiveCuts().left * root.mapScale
+                    height: parent.height
+                    color: "#101820cc"
+                    visible: width > 0
+                }
+
+                Rectangle {
+                    id: rightCutPreview
+                    x: parent.width - width
+                    y: 0
+                    width: root.effectiveCuts().right * root.mapScale
+                    height: parent.height
+                    color: "#101820cc"
+                    visible: width > 0
+                }
+
+                Rectangle {
+                    id: topCutPreview
+                    x: 0
+                    y: 0
+                    width: parent.width
+                    height: root.effectiveCuts().top * root.mapScale
+                    color: "#111827bb"
+                    visible: height > 0
+                }
+
+                Rectangle {
+                    id: bottomCutPreview
+                    x: 0
+                    y: parent.height - height
+                    width: parent.width
+                    height: root.effectiveCuts().bottom * root.mapScale
+                    color: "#111827bb"
+                    visible: height > 0
+                }
+
+                Rectangle {
                     id: cropPreview
-                    x: Math.max(0, xSpin.value * root.mapScale)
-                    y: Math.max(0, ySpin.value * root.mapScale)
-                    width: Math.max(2, wSpin.value * root.mapScale)
-                    height: Math.max(2, hSpin.value * root.mapScale)
+                    x: root.effectiveCuts().left * root.mapScale
+                    y: root.effectiveCuts().top * root.mapScale
+                    width: Math.max(2, (root.sourceWidth - root.effectiveCuts().left - root.effectiveCuts().right) * root.mapScale)
+                    height: Math.max(2, (root.sourceHeight - root.effectiveCuts().top - root.effectiveCuts().bottom) * root.mapScale)
                     radius: 5
                     color: "#223c2e55"
                     border.color: "#34d399"
@@ -142,68 +276,157 @@ Rectangle {
             }
         }
 
-        GridLayout {
-            Layout.fillWidth: true
-            columns: 2
-            columnSpacing: 10
-            rowSpacing: 10
-
-            Label { text: "cropX"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-            NumericSpinBox {
-                id: xSpin
-                Layout.fillWidth: true
-                from: 0
-                to: Math.max(0, root.sourceWidth)
-                accentColor: "#34d399"
-            }
-
-            Label { text: "cropY"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-            NumericSpinBox {
-                id: ySpin
-                Layout.fillWidth: true
-                from: 0
-                to: Math.max(0, root.sourceHeight)
-                accentColor: "#34d399"
-            }
-
-            Label { text: "width"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-            NumericSpinBox {
-                id: wSpin
-                Layout.fillWidth: true
-                from: 64
-                to: Math.max(64, root.sourceWidth)
-                accentColor: "#2dd4bf"
-            }
-
-            Label { text: "height"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-            NumericSpinBox {
-                id: hSpin
-                Layout.fillWidth: true
-                from: 64
-                to: Math.max(64, root.sourceHeight)
-                accentColor: "#2dd4bf"
-            }
-        }
-
-        RowLayout {
+        ColumnLayout {
             Layout.fillWidth: true
             spacing: 10
 
-            ControlButton {
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: "Apply"
-                accentColor: "#34d399"
-                baseColor: "#153226"
-                onClicked: root.applyCrop(xSpin.value, ySpin.value, wSpin.value, hSpin.value)
+                spacing: 4
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "left"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.effectiveCuts().left
+                        color: "#f8fafc"
+                        horizontalAlignment: Text.AlignRight
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+
+                Slider {
+                    id: leftSlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: root.horizontalLimit()
+                    stepSize: 1
+                    live: true
+                    onMoved: {
+                        root.clampActiveSlider("left")
+                        root.scheduleApply()
+                    }
+                    onPressedChanged: if (!pressed) {
+                        root.clampActiveSlider("left")
+                        root.applySliderCrop()
+                    }
+                }
             }
 
-            ControlButton {
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: "Reset"
-                accentColor: "#38bdf8"
-                baseColor: "#142838"
-                onClicked: root.resetCrop()
+                spacing: 4
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "right"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.effectiveCuts().right
+                        color: "#f8fafc"
+                        horizontalAlignment: Text.AlignRight
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+
+                Slider {
+                    id: rightSlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: root.horizontalLimit()
+                    stepSize: 1
+                    live: true
+                    onMoved: {
+                        root.clampActiveSlider("right")
+                        root.scheduleApply()
+                    }
+                    onPressedChanged: if (!pressed) {
+                        root.clampActiveSlider("right")
+                        root.applySliderCrop()
+                    }
+                }
             }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "top"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.effectiveCuts().top
+                        color: "#f8fafc"
+                        horizontalAlignment: Text.AlignRight
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+
+                Slider {
+                    id: topSlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: root.verticalLimit()
+                    stepSize: 1
+                    live: true
+                    onMoved: {
+                        root.clampActiveSlider("top")
+                        root.scheduleApply()
+                    }
+                    onPressedChanged: if (!pressed) {
+                        root.clampActiveSlider("top")
+                        root.applySliderCrop()
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "bottom"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.effectiveCuts().bottom
+                        color: "#f8fafc"
+                        horizontalAlignment: Text.AlignRight
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+
+                Slider {
+                    id: bottomSlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: root.verticalLimit()
+                    stepSize: 1
+                    live: true
+                    onMoved: {
+                        root.clampActiveSlider("bottom")
+                        root.scheduleApply()
+                    }
+                    onPressedChanged: if (!pressed) {
+                        root.clampActiveSlider("bottom")
+                        root.applySliderCrop()
+                    }
+                }
+            }
+        }
+
+        ControlButton {
+            Layout.fillWidth: true
+            text: "Reset"
+            accentColor: "#38bdf8"
+            baseColor: "#142838"
+            onClicked: root.resetCrop()
         }
 
         Rectangle {

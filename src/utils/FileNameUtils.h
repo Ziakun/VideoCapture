@@ -10,6 +10,6 @@ namespace FileNameUtils {
 
 QString defaultOutputDirectory();
 bool ensureDirectory(const QString& path, QString* errorMessage = nullptr);
-QString uniqueRecordingFilePath(const QString& outputDirectory);
+QString uniqueRecordingFilePath(const QString& outputDirectory, const QString& filePrefix = QStringLiteral("meeting-recording"));
 
 } // namespace FileNameUtils
