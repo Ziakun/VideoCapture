@@ -33,3 +33,7 @@ build.ninja
 
 # Local agent instructions
 AGENTS.md
+
+# Local Russian documentation copies
+docs/solution.ru.html
+docs/solution.ru.pdf

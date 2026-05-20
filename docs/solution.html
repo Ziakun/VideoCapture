@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>MeetVideoCapture - Technical Solution</title>
@@ -164,10 +164,10 @@
 <body>
   <main class="page">
     <section class="hero">
-      <h1>MeetVideoCapture: техническое решение</h1>
+      <h1>MeetVideoCapture: technical solution</h1>
       <p class="subtitle">
-        Приложение захватывает уже отрисованное видео Google Meet или Zoom Desktop из top-level
-        X11 окна, показывает crop в Qt/QML preview и по кнопке пишет его в MKV/H.264.
+        The application captures already-rendered Google Meet or Zoom Desktop video from a top-level
+        X11 window, displays the selected crop in a Qt/QML preview, and records it to MKV/H.264 on demand.
       </p>
       <span class="tagline">Qt 6 / C++ / QML</span>
       <span class="tagline">X11 window capture</span>
@@ -177,51 +177,52 @@
 
     <section class="grid">
       <div class="card ok">
-        <strong>Что делаем</strong>
+        <strong>What the application does</strong>
         <ul>
-          <li>Находим top-level окно Meet/Zoom/source app через X11.</li>
-          <li>Захватываем pixels этого окна по <code>XID</code>.</li>
-          <li>Обрезаем область meeting video внутри окна.</li>
-          <li>Показываем только crop и, при необходимости, пишем файл.</li>
+          <li>Finds a top-level Meet, Zoom, browser, or source application window through X11.</li>
+          <li>Captures pixels from that window by <code>XID</code>.</li>
+          <li>Crops the meeting-video region inside the selected source window.</li>
+          <li>Shows only the crop and, when requested, writes it to a recording file.</li>
         </ul>
       </div>
       <div class="card warning">
-        <strong>Чего принципиально не делаем</strong>
+        <strong>What the application intentionally does not do</strong>
         <ul>
-          <li>Не перехватываем внутренний <code>WebRTC MediaStream</code>.</li>
-          <li>Не вытаскиваем <code>VideoTrack</code> из браузера.</li>
-          <li>Не используем tab capture API и Chrome extension.</li>
-          <li>Не используем Zoom SDK для извлечения media stream.</li>
-          <li>Не используем Selenium/CDP/injection/packet sniffing.</li>
+          <li>It does not intercept an internal <code>WebRTC MediaStream</code>.</li>
+          <li>It does not extract a <code>VideoTrack</code> from the browser.</li>
+          <li>It does not use tab capture APIs or Chrome extensions.</li>
+          <li>It does not use the Zoom SDK to extract a media stream.</li>
+          <li>It does not use Selenium, CDP injection, packet sniffing, or similar hooks.</li>
         </ul>
       </div>
     </section>
 
-    <h2>1. Основная идея</h2>
+    <h2>1. Core idea</h2>
     <p>
-      Google Meet в браузере и Zoom Desktop уже декодируют видео и рисуют его в своем top-level
-      окне. Поэтому backend работает ниже уровня приложения: он берет готовую картинку окна из
-      X11. Для Meet это не WebRTC stream, а для Zoom это не внутренний media stream Zoom.
+      Google Meet in a browser and Zoom Desktop already decode video and render it into a top-level
+      application window. The backend therefore works below the application layer: it captures the
+      already-rendered X11 window image. For Meet this is not a WebRTC stream, and for Zoom this is
+      not Zoom's internal media stream.
     </p>
 
-    <div class="diagram">Google Meet в браузере или Zoom Desktop
-    ↓
-source app декодирует и рисует видео
-    ↓
-X11 capture top-level source window by XID
-    ↓
-crop области meeting video относительно source window
-    ↓
-Qt/QML preview latest frame
-    ↓
+    <div class="diagram">Google Meet in a browser or Zoom Desktop
+    -&gt;
+source app decodes and renders video
+    -&gt;
+X11 capture of the top-level source window by XID
+    -&gt;
+crop meeting-video region relative to the source window
+    -&gt;
+Qt/QML latest-frame preview
+    -&gt;
 optional MKV/H.264 recording</div>
 
-    <h2>2. Захват окна</h2>
+    <h2>2. Window capture</h2>
     <p>
-      <code>X11WindowFinder</code> читает список top-level окон, получает title, className,
-      XID, geometry, PID и source profile. Zoom meeting windows и browser meeting windows
-      сортируются выше остальных, но выбрать можно любое top-level окно. После выбора controller
-      передает XID и geometry в capture settings.
+      <code>X11WindowFinder</code> reads the list of top-level windows and collects title, class name,
+      XID, geometry, PID, and source profile. Zoom meeting windows and browser meeting windows are
+      sorted above other windows, but any valid top-level window can be selected. After selection,
+      the controller passes the XID and geometry into capture settings.
     </p>
     <div class="pipeline">ximagesrc xid=&lt;sourceWindowId&gt; use-damage=false show-pointer=false
   ! video/x-raw,framerate=30/1
@@ -232,32 +233,33 @@ optional MKV/H.264 recording</div>
   ! appsink emit-signals=true sync=false max-buffers=1 drop=true</div>
 
     <p>
-      UI хранит crop как <code>x/y/width/height</code>. GStreamer <code>videocrop</code>
-      принимает <code>left/top/right/bottom</code>, поэтому controller пересчитывает значения
-      от размеров выбранного окна:
+      The UI stores the crop as <code>x/y/width/height</code>. GStreamer <code>videocrop</code>
+      accepts <code>left/top/right/bottom</code>, so the controller converts the crop using the
+      selected source-window dimensions:
     </p>
     <div class="pipeline">left = cropX
 top = cropY
 right = sourceWidth - cropX - cropWidth
 bottom = sourceHeight - cropY - cropHeight</div>
 
-    <h2>3. Preview без накопления задержки</h2>
+    <h2>3. Preview without latency accumulation</h2>
     <p>
-      Preview построен по latest-frame strategy: хранится только последний кадр. Если UI не успел
-      отрисовать старый кадр, новый кадр его заменяет. Очереди preview нет, старые кадры не копятся.
+      Preview uses a latest-frame strategy: only the newest frame is stored. If the UI has not rendered
+      an older frame yet, the newer frame replaces it. There is no unbounded preview queue, so obsolete
+      frames do not accumulate.
     </p>
     <ul>
       <li><code>appsink drop=true</code>, <code>max-buffers=1</code>, <code>sync=false</code>.</li>
       <li><code>queue leaky=downstream</code>, <code>max-size-buffers=1</code>.</li>
-      <li><code>VideoFrameProvider</code> хранит latest <code>QImage</code> и сжимает update-сигналы.</li>
-      <li><code>VideoPreviewItem</code> отрисовывает кадр через Qt Quick scene graph texture node.</li>
+      <li><code>VideoFrameProvider</code> stores the latest <code>QImage</code> and coalesces update signals.</li>
+      <li><code>VideoPreviewItem</code> renders the frame through a Qt Quick scene graph texture node.</li>
     </ul>
 
-    <h2>4. Запись</h2>
+    <h2>4. Recording</h2>
     <p>
-      Recording не блокирует UI и не тормозит preview. Во время записи capture frames подаются в
-      <code>VideoRecorder</code>; когда запись выключена, этот feed отключен. Recorder имеет bounded
-      queue и при перегрузе начинает dropping, а не увеличивает latency.
+      Recording does not block the UI and does not slow down preview. While recording is active, capture
+      frames are fed into <code>VideoRecorder</code>; when recording is off, that feed is disconnected.
+      The recorder has a bounded queue and drops frames under overload instead of increasing latency.
     </p>
     <div class="pipeline">appsrc is-live=true format=time
   ! queue max-size-buffers=30 leaky=downstream
@@ -268,23 +270,23 @@ bottom = sourceHeight - cropY - cropHeight</div>
   ! matroskamux
   ! filesink location=&lt;source-profile-recording-YYYYMMDD-HHMMSS.mkv&gt;</div>
     <p>
-      Формат по умолчанию - MKV/H.264. MKV выбран потому, что он надежнее для live recording:
-      при аварийном завершении меньше риск получить полностью непригодный файл, чем с MP4.
+      The default format is MKV/H.264. MKV is used because it is more robust for live recording:
+      after an abnormal process exit, the risk of producing a completely unusable file is lower than with MP4.
     </p>
 
-    <h2>5. Потоки</h2>
+    <h2>5. Threads</h2>
     <div class="grid">
       <div class="card">
         <strong>UI thread</strong>
-        <p>QML, состояние controller, таймер записи, scene graph scheduling. Долгие X11/GStreamer команды сюда не попадают.</p>
+        <p>QML, controller state, recording timer, and scene graph scheduling. Long X11/GStreamer commands do not run here.</p>
       </div>
       <div class="card">
         <strong>Window refresh worker</strong>
-        <p><code>X11WindowFinder</code> перечисляет top-level окна в отдельном <code>QThread</code> и возвращает готовый список в UI.</p>
+        <p><code>X11WindowFinder</code> enumerates top-level windows in a separate <code>QThread</code> and returns a ready list to the UI.</p>
       </div>
       <div class="card">
         <strong>Capture command worker</strong>
-        <p>Start/stop/restart/update crop идут последовательно в отдельном <code>QThread</code>, без блокировки QML.</p>
+        <p>Start, stop, restart, and crop-update commands run serially in a separate <code>QThread</code>, without blocking QML.</p>
       </div>
       <div class="card">
         <strong>Capture streaming path</strong>
@@ -292,114 +294,114 @@ bottom = sourceHeight - cropY - cropHeight</div>
       </div>
       <div class="card">
         <strong>Recorder worker</strong>
-        <p>appsrc feeding, encoder/muxer/file sink, EOS/finalize без ожидания в UI thread.</p>
+        <p>appsrc feeding, encoder, muxer, file sink, EOS, and finalization without waiting in the UI thread.</p>
       </div>
       <div class="card">
         <strong>Bounded data flow</strong>
-        <p>Нет unbounded queues. Preview не ждет recorder. При перегрузе лучше drop, чем latency.</p>
+        <p>There are no unbounded queues. Preview does not wait for the recorder. Under overload, dropping is preferred over latency growth.</p>
       </div>
     </div>
 
     <h2>6. Fallback</h2>
     <p>
-      Если XID capture дает черный или stale кадр, можно переключиться на
-      <code>ScreenRegionFallback</code>. Тогда <code>ximagesrc</code> берет видимую область экрана
-      по координатам crop. Это не tab capture и не extension: это захват pixels экрана.
+      If XID capture returns black or stale frames, the application can switch to
+      <code>ScreenRegionFallback</code>. In that mode <code>ximagesrc</code> captures the visible screen
+      rectangle described by the crop coordinates. This is not tab capture and not an extension: it is
+      desktop pixel capture.
     </p>
     <p class="muted">
-      Ограничение fallback: если поверх выбранной video region окажется другое окно, оно тоже попадет в capture.
+      Fallback limitation: if another window covers the selected video region, that window will also be captured.
     </p>
 
-    <h2>7. Ограничения MVP</h2>
+    <h2>7. MVP limitations</h2>
     <ul>
-      <li>Только Ubuntu X11. Wayland/PipeWire portal можно добавить отдельным backend позже.</li>
-      <li>Свернутое или скрытое окно Meet/Zoom/source app может не рендериться.</li>
-      <li>XID capture зависит от compositor/GPU/source app и иногда может быть black/stale.</li>
-      <li>Crop задается численно относительно source window; визуальный overlay можно добавить позже.</li>
+      <li>Ubuntu X11 only. A Wayland/PipeWire portal backend can be added later.</li>
+      <li>A minimized or hidden Meet, Zoom, or source application window may stop rendering.</li>
+      <li>XID capture depends on the compositor, GPU, and source application, and may sometimes be black or stale.</li>
+      <li>Crop is set numerically relative to the source window; a visual overlay can be added later.</li>
     </ul>
 
-    <h2>8. Дальнейшее расширение на Windows и macOS</h2>
+    <h2>8. Future Windows and macOS expansion</h2>
     <p>
-      Linux/X11 backend должен оставаться первой реализацией общей архитектуры, а не отдельной
-      Linux-only веткой. Для расширения на Windows и macOS платформенный захват нужно отделить
-      от общей обработки кадров.
+      The Linux/X11 backend should remain the first implementation of a shared architecture, not a
+      separate Linux-only branch. To support Windows and macOS later, platform capture must stay
+      separated from common frame processing.
     </p>
     <div class="diagram">Platform capture backend
-    ↓
+    -&gt;
 common VideoFrame / frame abstraction
-    ↓
+    -&gt;
 crop / timestamp / format normalization
-    ↓
+    -&gt;
 common frame pipeline
-    ↓
+    -&gt;
 preview / analysis / recorder</div>
 
     <p>
-      Платформозависимыми остаются перечисление окон, выбор native source id, permission model,
-      реальный capture API и работа с native pixel buffer или texture. Общими остаются frame
-      abstraction, crop settings, timestamps, FPS/statistics, black/stale detection,
-      bounded/latest-frame delivery, recorder interface, file naming и единая модель
-      warnings/errors.
+      Platform-specific parts are window enumeration, native source-id selection, permission model,
+      the actual capture API, and native pixel-buffer or texture handling. Common parts are the frame
+      abstraction, crop settings, timestamps, FPS/statistics, black/stale detection, bounded/latest-frame
+      delivery, recorder interface, file naming, and a shared warnings/errors model.
     </p>
 
     <div class="grid">
       <div class="card">
         <strong>Linux</strong>
         <p>
-          Текущий X11 путь: XID → GStreamer ximagesrc → crop → common frame.
-          Для Wayland логичное расширение: PipeWire / xdg-desktop-portal →
-          selected window или display stream → common frame.
+          Current X11 path: XID -&gt; GStreamer ximagesrc -&gt; crop -&gt; common frame.
+          For Wayland, the natural extension is PipeWire / xdg-desktop-portal -&gt;
+          selected window or display stream -&gt; common frame.
         </p>
       </div>
       <div class="card">
         <strong>Windows</strong>
         <p>
-          Основной путь: HWND / selected window → Windows Graphics Capture →
-          Direct3D texture frames → crop/convert → common frame. Не нужно строить backend
-          на GDI screenshots или screenshot loop.
+          Main path: HWND / selected window -&gt; Windows Graphics Capture -&gt;
+          Direct3D texture frames -&gt; crop/convert -&gt; common frame. The backend should not be
+          based on GDI screenshots or a screenshot loop.
         </p>
       </div>
       <div class="card">
         <strong>macOS</strong>
         <p>
-          Основной путь: SCWindow или display → ScreenCaptureKit →
-          CMSampleBuffer / CVPixelBuffer → crop/convert → common frame.
-          Реализация частично будет Objective-C++.
+          Main path: SCWindow or display -&gt; ScreenCaptureKit -&gt;
+          CMSampleBuffer / CVPixelBuffer -&gt; crop/convert -&gt; common frame.
+          The implementation will partly use Objective-C++.
         </p>
       </div>
       <div class="card">
         <strong>Recorder</strong>
         <p>
-          На первом этапе можно оставить общий recorder через GStreamer appsrc →
-          x264enc → matroskamux → MKV/H.264, если GStreamer runtime поставляется вместе
-          с приложением. Позже возможны native recorder backends: Linux → GStreamer,
-          Windows → Media Foundation / hardware encoder, macOS → AVAssetWriter / VideoToolbox.
+          The first cross-platform step can keep the shared GStreamer recorder:
+          appsrc -&gt; x264enc -&gt; matroskamux -&gt; MKV/H.264, provided that the GStreamer runtime
+          is shipped with the application. Later native recorder backends are possible:
+          Linux -&gt; GStreamer, Windows -&gt; Media Foundation / hardware encoder,
+          macOS -&gt; AVAssetWriter / VideoToolbox.
         </p>
       </div>
     </div>
 
     <p>
-      Ограничения Windows: может потребоваться user consent или picker, protected windows
-      могут не захватываться, minimized window может не обновляться, а GPU/driver/compositor
-      могут влиять на результат. В будущем желательно избегать лишнего GPU→CPU copy, если
-      preview и recorder смогут работать с texture напрямую.
+      Windows limitations: user consent or a picker may be required, protected windows may not be
+      capturable, minimized windows may stop updating, and GPU/driver/compositor behavior can affect
+      the result. In the future it is preferable to avoid unnecessary GPU-to-CPU copies if preview
+      and recorder paths can consume textures directly.
     </p>
     <p>
-      Ограничения macOS: нужен Screen Recording permission, пользователь может запретить
-      доступ, protected content может не захватываться, minimized или hidden windows могут
-      не обновляться.
+      macOS limitations: Screen Recording permission is required, the user may deny access, protected
+      content may not be capturable, and minimized or hidden windows may stop updating.
     </p>
     <p class="muted">
-      Главное правило: не смешивать платформенный capture backend с общей логикой обработки
-      и записи. Linux/X11, Windows и macOS должны быть разными реализациями одного capture
-      interface. Тогда Ubuntu X11 MVP остается первой платформенной реализацией общей
-      meeting/window capture architecture, а не Linux-only тупиком.
+      Main rule: do not mix the platform capture backend with common processing and recording logic.
+      Linux/X11, Windows, and macOS should be different implementations of one capture interface.
+      Then the Ubuntu X11 MVP remains the first platform implementation of a shared meeting/window
+      capture architecture, not a Linux-only dead end.
     </p>
 
     <div class="footer">
-      Итог: MeetVideoCapture не взламывает браузер, не трогает WebRTC и не извлекает внутренний
-      media stream Zoom. Он захватывает то, что source app уже отрисовал в X11-окне, обрезает
-      нужную область и передает ее в быстрый preview и recorder.
+      Summary: MeetVideoCapture does not hack the browser, does not touch WebRTC, and does not extract
+      Zoom's internal media stream. It captures what the source application has already rendered into
+      an X11 window, crops the required region, and sends it to a low-latency preview and recorder.
     </div>
   </main>
 </body>
