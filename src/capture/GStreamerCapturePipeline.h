@@ -1,6 +1,7 @@
 #pragma once
 
 #include "capture/CaptureSettings.h"
+#include "capture/CaptureFrameMonitor.h"
 #include "capture/FrameStats.h"
 #include "capture/VideoFrame.h"
 #include "ui/VideoFrameProvider.h"
@@ -21,20 +22,22 @@
 // The main backend is ximagesrc by X11 window id. A screen-region fallback is
 // also supported. The class keeps capture latency low by using leaky queues,
 // appsink drop mode, and a latest-frame handoff to VideoFrameProvider.
-class GStreamerCapturePipeline : public QObject {
+class GStreamerCapturePipeline : public QObject
+{
     Q_OBJECT
 
-public:
+  public:
+    // Stores the preview provider used for latest-frame delivery.
     explicit GStreamerCapturePipeline(VideoFrameProvider* frameProvider, QObject* parent = nullptr);
+    // Stops the pipeline and joins the bus thread.
     ~GStreamerCapturePipeline() override;
 
-    bool start(const CaptureSettings& settings, QString* errorMessage = nullptr);
-    void stop();
-    bool isRunning() const;
-    bool updateCropRect(const QRect& cropRect);
-    FrameStats stats() const;
+    bool start(const CaptureSettings& settings,
+               QString* errorMessage = nullptr); // Builds and starts a capture pipeline.
+    void stop(); // Stops pipeline, releases GStreamer references, and emits captureStopped if needed.
+    bool updateCropRect(const QRect& cropRect); // Updates videocrop margins when the active mode supports it.
 
-signals:
+  signals:
     void captureStarted();
     void captureStopped();
     void frameReady(const VideoFrame& frame);
@@ -45,52 +48,29 @@ signals:
     void blackFrameDetected();
     void staleFramesDetected();
 
-private:
-    // A small sampled summary of a frame used for black/stale detection without
-    // scanning every pixel.
-    struct FrameAnalysis {
-        double averageBrightness = 0.0;
-        quint64 hash = 0;
-    };
-
+  private:
     static GstFlowReturn onNewSample(GstAppSink* sink, gpointer userData);
 
-    bool buildPipeline(const CaptureSettings& settings, QString* errorMessage);
-    QString buildX11WindowPipelineDescription(const CaptureSettings& settings) const;
-    QString buildScreenRegionPipelineDescription(const CaptureSettings& settings) const;
-    bool checkPlugins(const CaptureSettings& settings, QString* errorMessage) const;
-    GstFlowReturn handleSample(GstAppSink* sink);
-    FrameAnalysis analyzeFrame(const uchar* data, int stride, int width, int height) const;
-    void updateStatsAndWarnings(const FrameAnalysis& analysis);
-    void resetDetection();
-    void startBusThread();
-    void stopBusThread();
-    void busLoop();
-    FrameStats snapshotStats() const;
+    bool buildPipeline(const CaptureSettings& settings, QString* errorMessage); // Parses and wires the GStreamer graph.
+    GstFlowReturn handleSample(GstAppSink* sink); // Copies one appsink sample into preview/recorder frame paths.
+    void emitMonitorUpdate(const CaptureFrameMonitor::Update& update); // Emits monitor notifications outside locks.
+    void startBusThread();                                             // Starts background bus polling.
+    void stopBusThread();                                              // Stops and joins the bus polling thread.
+    void busLoop();                                                    // Polls GStreamer bus for ERROR/WARNING/EOS.
 
     VideoFrameProvider* previewFrameProvider = nullptr;
 
     mutable QMutex stateMutex;
-    mutable QMutex statsMutex;
 
     GstElement* pipeline = nullptr;
     GstElement* appSink = nullptr;
     GstElement* cropper = nullptr;
 
     CaptureSettings captureSettings;
-    FrameStats frameStats;
+    CaptureFrameMonitor frameMonitor;
 
     std::atomic_bool running = false;
     std::atomic_bool busRunning = false;
     std::thread busThread;
-
-    QElapsedTimer fpsTimer;
     QElapsedTimer frameClock;
-    int framesInInterval = 0;
-
-    quint64 lastHash = 0;
-    int blackConsecutiveFrames = 0;
-    int staleConsecutiveFrames = 0;
-    bool blackWarningActive = false;
-    bool staleWarningActive = false;
 };

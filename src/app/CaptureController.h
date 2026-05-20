@@ -1,7 +1,10 @@
 #pragma once
 
+#include "app/CropRectValidator.h"
 #include "capture/CaptureSettings.h"
+#include "capture/VideoContentDetector.h"
 #include "app/CapturePipelineWorker.h"
+#include "app/WindowListModelBuilder.h"
 #include "app/WindowRefreshWorker.h"
 #include "recording/VideoRecorder.h"
 #include "ui/VideoFrameProvider.h"
@@ -17,75 +20,54 @@
 // recording state, status messages, and timers in one Qt-friendly API. It
 // deliberately does not implement X11, GStreamer, or recording internals; those
 // stay in their dedicated backend classes.
-class CaptureController : public QObject {
+class CaptureController : public QObject
+{
     Q_OBJECT
 
-    Q_PROPERTY(QObject* frameProvider READ frameProvider CONSTANT)
-    Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
-    Q_PROPERTY(bool isCapturing READ isCapturing NOTIFY isCapturingChanged)
-    Q_PROPERTY(bool isRecording READ isRecording NOTIFY isRecordingChanged)
-    Q_PROPERTY(bool hasPreviewFrame READ hasPreviewFrame NOTIFY hasPreviewFrameChanged)
-    Q_PROPERTY(QString selectedWindowTitle READ selectedWindowTitle NOTIFY selectedWindowChanged)
-    Q_PROPERTY(qulonglong selectedWindowId READ selectedWindowId NOTIFY selectedWindowChanged)
-    Q_PROPERTY(QString selectedSourceType READ selectedSourceType NOTIFY selectedWindowChanged)
-    Q_PROPERTY(QString outputFilePath READ outputFilePath NOTIFY outputFilePathChanged)
-    Q_PROPERTY(int recordingSeconds READ recordingSeconds NOTIFY recordingSecondsChanged)
-    Q_PROPERTY(QString recordingTimeText READ recordingTimeText NOTIFY recordingSecondsChanged)
-    Q_PROPERTY(double fps READ fps NOTIFY fpsChanged)
-    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
-    Q_PROPERTY(QString warningMessage READ warningMessage NOTIFY warningMessageChanged)
-    Q_PROPERTY(QString previewMessage READ previewMessage NOTIFY previewMessageChanged)
-    Q_PROPERTY(int cropX READ cropX NOTIFY cropChanged)
-    Q_PROPERTY(int cropY READ cropY NOTIFY cropChanged)
-    Q_PROPERTY(int cropWidth READ cropWidth NOTIFY cropChanged)
-    Q_PROPERTY(int cropHeight READ cropHeight NOTIFY cropChanged)
-    Q_PROPERTY(QString captureModeText READ captureModeText NOTIFY captureModeChanged)
-    Q_PROPERTY(QString sourceGeometryText READ sourceGeometryText NOTIFY sourceGeometryChanged)
-    Q_PROPERTY(int sourceWidth READ sourceWidth NOTIFY sourceGeometryChanged)
-    Q_PROPERTY(int sourceHeight READ sourceHeight NOTIFY sourceGeometryChanged)
+    Q_PROPERTY(QObject* frameProvider MEMBER previewFrameProviderObject CONSTANT)
+    Q_PROPERTY(QVariantList windows MEMBER windowModel NOTIFY windowsChanged)
+    Q_PROPERTY(bool isCapturing MEMBER capturingActive NOTIFY isCapturingChanged)
+    Q_PROPERTY(bool isRecording MEMBER recordingActive NOTIFY isRecordingChanged)
+    Q_PROPERTY(bool hasPreviewFrame MEMBER previewFrameAvailable NOTIFY hasPreviewFrameChanged)
+    Q_PROPERTY(QString selectedWindowTitle MEMBER currentSelectedWindowTitle NOTIFY selectedWindowChanged)
+    Q_PROPERTY(qulonglong selectedWindowId MEMBER currentSelectedWindowId NOTIFY selectedWindowChanged)
+    Q_PROPERTY(QString selectedSourceType MEMBER currentSelectedSourceType NOTIFY selectedWindowChanged)
+    Q_PROPERTY(QString outputFilePath MEMBER currentOutputFilePath NOTIFY outputFilePathChanged)
+    Q_PROPERTY(int recordingSeconds MEMBER elapsedRecordingSeconds NOTIFY recordingSecondsChanged)
+    Q_PROPERTY(QString recordingTimeText MEMBER currentRecordingTimeText NOTIFY recordingSecondsChanged)
+    Q_PROPERTY(double fps MEMBER currentFps NOTIFY fpsChanged)
+    Q_PROPERTY(QString statusMessage MEMBER currentStatusMessage NOTIFY statusMessageChanged)
+    Q_PROPERTY(QString warningMessage MEMBER currentWarningMessage NOTIFY warningMessageChanged)
+    Q_PROPERTY(QString previewMessage MEMBER currentPreviewMessage NOTIFY previewMessageChanged)
+    Q_PROPERTY(int cropX MEMBER currentCropX NOTIFY cropChanged)
+    Q_PROPERTY(int cropY MEMBER currentCropY NOTIFY cropChanged)
+    Q_PROPERTY(int cropWidth MEMBER currentCropWidth NOTIFY cropChanged)
+    Q_PROPERTY(int cropHeight MEMBER currentCropHeight NOTIFY cropChanged)
+    Q_PROPERTY(QString captureModeText MEMBER currentCaptureModeText NOTIFY captureModeChanged)
+    Q_PROPERTY(QString sourceGeometryText MEMBER currentSourceGeometryText NOTIFY sourceGeometryChanged)
+    Q_PROPERTY(int sourceWidth MEMBER currentSourceWidth NOTIFY sourceGeometryChanged)
+    Q_PROPERTY(int sourceHeight MEMBER currentSourceHeight NOTIFY sourceGeometryChanged)
 
-public:
+  public:
+    // Creates workers, connects capture/recording signals, and starts initial window refresh.
     explicit CaptureController(QObject* parent = nullptr);
+    // Stops recording/capture workers and joins their threads during shutdown.
     ~CaptureController() override;
 
-    QObject* frameProvider();
-    QVariantList windows() const;
-    bool isCapturing() const;
-    bool isRecording() const;
-    bool hasPreviewFrame() const;
-    QString selectedWindowTitle() const;
-    qulonglong selectedWindowId() const;
-    QString selectedSourceType() const;
-    QString outputFilePath() const;
-    int recordingSeconds() const;
-    QString recordingTimeText() const;
-    double fps() const;
-    QString statusMessage() const;
-    QString warningMessage() const;
-    QString previewMessage() const;
-    int cropX() const;
-    int cropY() const;
-    int cropWidth() const;
-    int cropHeight() const;
-    QString captureModeText() const;
-    QString sourceGeometryText() const;
-    int sourceWidth() const;
-    int sourceHeight() const;
+    Q_INVOKABLE void refreshWindows();             // Asks the X11 worker to refresh the selectable window list.
+    Q_INVOKABLE void selectWindow(qulonglong xid); // Selects a source by XID and resets capture/crop state.
+    Q_INVOKABLE void startCapture();               // Validates crop/settings and starts capture on the worker thread.
+    Q_INVOKABLE void stopCapture();                // Stops capture and clears preview/recording state.
+    Q_INVOKABLE void toggleRecording();            // Starts or stops recording based on current recorder state.
+    Q_INVOKABLE void startRecording();             // Creates a file path, starts recorder, and connects frame feed.
+    Q_INVOKABLE void stopRecording();              // Disconnects frame feed and finalizes the recording asynchronously.
+    Q_INVOKABLE void setCropRect(int x, int y, int width, int height); // Validates and applies a crop rectangle.
+    Q_INVOKABLE void resetCropToAutoState();                     // Restores detected auto-crop or full source crop.
+    Q_INVOKABLE void chooseOutputDirectory(const QString& path); // Stores a local output directory path from QML.
+    Q_INVOKABLE void dismissCurrentMessage();                    // Clears visible warning/status/preview messages.
+    Q_INVOKABLE void switchToScreenRegionFallback();             // Switches capture to visible screen-region fallback.
 
-    Q_INVOKABLE void refreshWindows();
-    Q_INVOKABLE void selectWindow(qulonglong xid);
-    Q_INVOKABLE void startCapture();
-    Q_INVOKABLE void stopCapture();
-    Q_INVOKABLE void toggleRecording();
-    Q_INVOKABLE void startRecording();
-    Q_INVOKABLE void stopRecording();
-    Q_INVOKABLE void setCropRect(int x, int y, int width, int height);
-    Q_INVOKABLE void resetCropToAutoState();
-    Q_INVOKABLE void chooseOutputDirectory(const QString& path);
-    Q_INVOKABLE void dismissCurrentMessage();
-    Q_INVOKABLE void switchToScreenRegionFallback();
-
-signals:
+  signals:
     void windowsChanged();
     void isCapturingChanged();
     void isRecordingChanged();
@@ -101,35 +83,39 @@ signals:
     void captureModeChanged();
     void sourceGeometryChanged();
 
-private:
-    const X11WindowInfo* findWindow(quint64 xid) const;
-    void rebuildWindowVariantList();
-    void setIsCapturing(bool value);
-    void setIsRecording(bool value);
-    void setHasPreviewFrame(bool value);
-    void setStatusMessage(const QString& message);
-    void setWarningMessage(const QString& message);
-    void setPreviewMessage(const QString& message);
-    void updatePreviewMessage();
-    bool autoCropToVideoArea();
-    void tryPendingAutoCrop();
-    void handleWindowsReady(int requestId, const QVector<X11WindowInfo>& windows, const QString& error);
-    void handleCaptureCommandFailed(quint64 commandId, const QString& error);
-    void handleCaptureCommandSucceeded(quint64 commandId);
-    void updateSourceFromSelectedWindow(const X11WindowInfo& info);
-    QRect validatedCropRect(int x, int y, int width, int height, QString* warningMessage) const;
-    void applyCropRect(const QRect& rect);
-    QRect currentFallbackScreenRect() const;
-    void restartCaptureForCurrentSettings();
-    quint64 nextCaptureCommandId();
-    void connectRecorderFrameFeed();
-    void disconnectRecorderFrameFeed();
-    static QString formatRecordingTime(int seconds);
+  private:
+    void setIsCapturing(bool value);                // Updates capture state and emits only on change.
+    void setIsRecording(bool value);                // Updates recording state and emits only on change.
+    void setHasPreviewFrame(bool value);            // Updates preview availability and emits only on change.
+    void setStatusMessage(const QString& message);  // Stores status text and emits only on change.
+    void setWarningMessage(const QString& message); // Stores warning text and emits only on change.
+    void setPreviewMessage(const QString& message); // Stores preview overlay text and emits only on change.
+    void updatePreviewMessage(); // Derives preview overlay text from source/capture/frame/warning state.
+    bool autoCropToVideoArea();  // Detects a browser video area from the latest preview frame and applies crop.
+    void tryPendingAutoCrop();   // Runs bounded auto-crop attempts after capture frames arrive.
+    void handleWindowsReady(int requestId, const QVector<X11WindowInfo>& windows,
+                            const QString& error); // Applies worker result if it is the latest request.
+    void handleCaptureCommandFailed(quint64 commandId,
+                                    const QString& error); // Rolls back pending state after worker failure.
+    void handleCaptureCommandSucceeded(quint64 commandId); // Clears completed pending capture command state.
+    void updateSourceFromSelectedWindow(const X11WindowInfo& info); // Copies selected window geometry into settings.
+    QRect validatedCropRect(int x, int y, int width, int height,
+                            QString* warningMessage) const; // Clamps crop through CropRectValidator.
+    void applyCropRect(const QRect& rect);                  // Stores crop and emits cropChanged when value differs.
+    void syncCropProperties();                              // Copies cropRect into QML MEMBER fields.
+    void syncSourceGeometryProperties();                    // Copies source geometry into QML MEMBER fields.
+    QRect currentFallbackScreenRect() const; // Converts window-relative crop to absolute screen coordinates.
+    void restartCaptureForCurrentSettings(); // Restarts a running capture pipeline with current settings.
+    quint64 nextCaptureCommandId();          // Returns a monotonically increasing worker command id.
+    void connectRecorderFrameFeed();    // Connects capture frames directly into the recorder queue while recording.
+    void disconnectRecorderFrameFeed(); // Removes the recorder frame feed when recording stops.
 
     QVector<X11WindowInfo> windowInfos;
     QVariantList windowModel;
+    WindowListModelBuilder windowListModelBuilder;
 
     VideoFrameProvider previewFrameProvider;
+    QObject* previewFrameProviderObject = &previewFrameProvider;
     QThread windowRefreshThread;
     WindowRefreshWorker* windowRefreshWorker = nullptr;
     QThread captureCommandThread;
@@ -138,6 +124,8 @@ private:
     QMetaObject::Connection recorderFrameConnection;
 
     CaptureSettings captureSettings;
+    CropRectValidator cropRectValidator;
+    VideoContentDetector videoContentDetector;
     QRect automaticCropRect;
     QTimer recordingTimer;
 
@@ -153,12 +141,21 @@ private:
 
     QString currentSelectedWindowTitle;
     QString currentSelectedSourceType = QStringLiteral("Window");
-    quint64 currentSelectedWindowId = 0;
+    qulonglong currentSelectedWindowId = 0;
     QString outputDirectory;
     QString currentOutputFilePath;
     int elapsedRecordingSeconds = 0;
+    QString currentRecordingTimeText = QStringLiteral("00:00:00");
     double currentFps = 0.0;
     QString currentStatusMessage = QStringLiteral("No video source selected");
     QString currentWarningMessage;
     QString currentPreviewMessage = QStringLiteral("No video source selected");
+    int currentCropX = 0;
+    int currentCropY = 0;
+    int currentCropWidth = 0;
+    int currentCropHeight = 0;
+    QString currentCaptureModeText = QStringLiteral("X11WindowById");
+    QString currentSourceGeometryText = QStringLiteral("-");
+    int currentSourceWidth = 0;
+    int currentSourceHeight = 0;
 };

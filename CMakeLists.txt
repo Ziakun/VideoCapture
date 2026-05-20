@@ -27,24 +27,53 @@ pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
 
 qt_add_executable(MeetVideoCapture
     src/main.cpp
+    src/app/CaptureControllerCommands.cpp
     src/app/CapturePipelineWorker.cpp
     src/app/CapturePipelineWorker.h
     src/app/CaptureController.cpp
     src/app/CaptureController.h
+    src/app/CaptureControllerCrop.cpp
+    src/app/CaptureControllerState.cpp
+    src/app/CaptureFormatting.cpp
+    src/app/CaptureFormatting.h
+    src/app/CropRectValidator.cpp
+    src/app/CropRectValidator.h
+    src/app/WindowListModelBuilder.cpp
+    src/app/WindowListModelBuilder.h
     src/app/WindowRefreshWorker.cpp
     src/app/WindowRefreshWorker.h
-    src/capture/CaptureSettings.cpp
     src/capture/CaptureSettings.h
-    src/capture/FrameStats.cpp
+    src/capture/CaptureFrameMonitor.cpp
+    src/capture/CaptureFrameMonitor.h
     src/capture/FrameStats.h
+    src/capture/GStreamerCapturePipelineBuilder.cpp
+    src/capture/GStreamerCapturePipelineBuilder.h
     src/capture/GStreamerCapturePipeline.cpp
+    src/capture/GStreamerCapturePipelineBus.cpp
+    src/capture/GStreamerCapturePipelineLifecycle.cpp
     src/capture/GStreamerCapturePipeline.h
+    src/capture/VideoContentDetector.cpp
+    src/capture/VideoContentDetector.h
     src/capture/VideoFrame.h
+    src/config/VideoCaptureConstants.h
+    src/capture/x11/X11WindowClassifier.cpp
+    src/capture/x11/X11WindowClassifier.h
     src/capture/x11/X11WindowFinder.cpp
     src/capture/x11/X11WindowFinder.h
     src/capture/x11/X11WindowInfo.h
+    src/capture/x11/X11WindowPropertyReader.cpp
+    src/capture/x11/X11WindowPropertyReader.h
+    src/gstreamer/GStreamerRuntime.cpp
+    src/gstreamer/GStreamerRuntime.h
+    src/recording/GStreamerFrameWriter.cpp
+    src/recording/GStreamerFrameWriter.h
+    src/recording/GStreamerRecordingFinalizer.cpp
+    src/recording/GStreamerRecordingFinalizer.h
+    src/recording/GStreamerRecordingPipelineBuilder.cpp
+    src/recording/GStreamerRecordingPipelineBuilder.h
     src/recording/RecordingSettings.h
     src/recording/VideoRecorder.cpp
+    src/recording/VideoRecorderLifecycle.cpp
     src/recording/VideoRecorder.h
     src/ui/VideoFrameProvider.cpp
     src/ui/VideoFrameProvider.h
@@ -52,8 +81,6 @@ qt_add_executable(MeetVideoCapture
     src/ui/VideoPreviewItem.h
     src/utils/FileNameUtils.cpp
     src/utils/FileNameUtils.h
-    src/utils/Logging.cpp
-    src/utils/Logging.h
 )
 
 set_target_properties(MeetVideoCapture PROPERTIES
@@ -66,6 +93,8 @@ qt_add_resources(MeetVideoCapture qml_resources
     FILES
     qml/Main.qml
     qml/components/CropControls.qml
+    qml/components/CropEdgeSlider.qml
+    qml/components/CropMap.qml
     qml/components/ControlButton.qml
     qml/components/NumericSpinBox.qml
     qml/components/RecordButton.qml
@@ -103,12 +132,20 @@ option(MEETVIDEOCAPTURE_BUILD_TESTS "Build local smoke test utilities" OFF)
 if (MEETVIDEOCAPTURE_BUILD_TESTS)
     qt_add_executable(RecorderSmokeTest
         tests/RecorderSmokeTest.cpp
+        src/gstreamer/GStreamerRuntime.cpp
+        src/gstreamer/GStreamerRuntime.h
+        src/recording/GStreamerFrameWriter.cpp
+        src/recording/GStreamerFrameWriter.h
+        src/recording/GStreamerRecordingFinalizer.cpp
+        src/recording/GStreamerRecordingFinalizer.h
+        src/recording/GStreamerRecordingPipelineBuilder.cpp
+        src/recording/GStreamerRecordingPipelineBuilder.h
+        src/config/VideoCaptureConstants.h
         src/recording/VideoRecorder.cpp
+        src/recording/VideoRecorderLifecycle.cpp
         src/recording/VideoRecorder.h
         src/recording/RecordingSettings.h
         src/capture/VideoFrame.h
-        src/utils/Logging.cpp
-        src/utils/Logging.h
     )
 
     set_target_properties(RecorderSmokeTest PROPERTIES

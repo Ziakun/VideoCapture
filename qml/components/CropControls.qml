@@ -13,20 +13,15 @@ Rectangle {
     property int sourceHeight: 0
     property string sourceGeometryText: "-"
     property string captureModeText: "X11WindowById"
+    property bool syncing: false
+
+    readonly property int minimumCropSize: 64
 
     signal applyCrop(int x, int y, int width, int height)
     signal resetCrop()
 
     color: "#0f151e"
     border.color: "#263344"
-
-    readonly property real mapScale: sourceWidth > 0 && sourceHeight > 0
-        ? Math.min((cropMap.width - 24) / sourceWidth, (cropMap.height - 24) / sourceHeight)
-        : 0
-    readonly property real mapWidth: Math.max(1, sourceWidth * mapScale)
-    readonly property real mapHeight: Math.max(1, sourceHeight * mapScale)
-    readonly property int minimumCropSize: 64
-    property bool syncing: false
 
     function syncValues() {
         syncing = true
@@ -176,247 +171,83 @@ Rectangle {
             elide: Text.ElideRight
         }
 
-        Item {
+        CropMap {
             id: cropMap
             Layout.fillWidth: true
             Layout.preferredHeight: 154
-
-            Rectangle {
-                anchors.fill: parent
-                radius: 12
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#111c28" }
-                    GradientStop { position: 1.0; color: "#0b111a" }
-                }
-                border.color: "#27364a"
-            }
-
-            Rectangle {
-                id: sourceMap
-                width: root.mapWidth
-                height: root.mapHeight
-                anchors.centerIn: parent
-                radius: 7
-                color: "#101820"
-                border.color: "#475569"
-
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: 1
-                    radius: 6
-                    color: "#0a0f15"
-                    opacity: 0.88
-                }
-
-                Rectangle {
-                    id: leftCutPreview
-                    x: 0
-                    y: 0
-                    width: root.effectiveCuts().left * root.mapScale
-                    height: parent.height
-                    color: "#101820cc"
-                    visible: width > 0
-                }
-
-                Rectangle {
-                    id: rightCutPreview
-                    x: parent.width - width
-                    y: 0
-                    width: root.effectiveCuts().right * root.mapScale
-                    height: parent.height
-                    color: "#101820cc"
-                    visible: width > 0
-                }
-
-                Rectangle {
-                    id: topCutPreview
-                    x: 0
-                    y: 0
-                    width: parent.width
-                    height: root.effectiveCuts().top * root.mapScale
-                    color: "#111827bb"
-                    visible: height > 0
-                }
-
-                Rectangle {
-                    id: bottomCutPreview
-                    x: 0
-                    y: parent.height - height
-                    width: parent.width
-                    height: root.effectiveCuts().bottom * root.mapScale
-                    color: "#111827bb"
-                    visible: height > 0
-                }
-
-                Rectangle {
-                    id: cropPreview
-                    x: root.effectiveCuts().left * root.mapScale
-                    y: root.effectiveCuts().top * root.mapScale
-                    width: Math.max(2, (root.sourceWidth - root.effectiveCuts().left - root.effectiveCuts().right) * root.mapScale)
-                    height: Math.max(2, (root.sourceHeight - root.effectiveCuts().top - root.effectiveCuts().bottom) * root.mapScale)
-                    radius: 5
-                    color: "#223c2e55"
-                    border.color: "#34d399"
-                    border.width: 2
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        height: 2
-                        radius: 1
-                        color: "#a7f3d0"
-                    }
-
-                    Behavior on x { NumberAnimation { duration: 120 } }
-                    Behavior on y { NumberAnimation { duration: 120 } }
-                    Behavior on width { NumberAnimation { duration: 120 } }
-                    Behavior on height { NumberAnimation { duration: 120 } }
-                }
-            }
+            sourceWidth: root.sourceWidth
+            sourceHeight: root.sourceHeight
+            leftCut: root.effectiveCuts().left
+            rightCut: root.effectiveCuts().right
+            topCut: root.effectiveCuts().top
+            bottomCut: root.effectiveCuts().bottom
         }
 
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 10
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 4
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "left"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-                    Label {
-                        Layout.fillWidth: true
-                        text: root.effectiveCuts().left
-                        color: "#f8fafc"
-                        horizontalAlignment: Text.AlignRight
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
+            CropEdgeSlider {
+                id: leftSlider
+                label: "left"
+                edgeName: "left"
+                valueText: root.effectiveCuts().left
+                limit: root.horizontalLimit()
+                onEdgeMoved: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.scheduleApply()
                 }
-
-                Slider {
-                    id: leftSlider
-                    Layout.fillWidth: true
-                    from: 0
-                    to: root.horizontalLimit()
-                    stepSize: 1
-                    live: true
-                    onMoved: {
-                        root.clampActiveSlider("left")
-                        root.scheduleApply()
-                    }
-                    onPressedChanged: if (!pressed) {
-                        root.clampActiveSlider("left")
-                        root.applySliderCrop()
-                    }
+                onEdgeReleased: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.applySliderCrop()
                 }
             }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 4
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "right"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-                    Label {
-                        Layout.fillWidth: true
-                        text: root.effectiveCuts().right
-                        color: "#f8fafc"
-                        horizontalAlignment: Text.AlignRight
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
+            CropEdgeSlider {
+                id: rightSlider
+                label: "right"
+                edgeName: "right"
+                valueText: root.effectiveCuts().right
+                limit: root.horizontalLimit()
+                onEdgeMoved: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.scheduleApply()
                 }
-
-                Slider {
-                    id: rightSlider
-                    Layout.fillWidth: true
-                    from: 0
-                    to: root.horizontalLimit()
-                    stepSize: 1
-                    live: true
-                    onMoved: {
-                        root.clampActiveSlider("right")
-                        root.scheduleApply()
-                    }
-                    onPressedChanged: if (!pressed) {
-                        root.clampActiveSlider("right")
-                        root.applySliderCrop()
-                    }
+                onEdgeReleased: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.applySliderCrop()
                 }
             }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 4
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "top"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-                    Label {
-                        Layout.fillWidth: true
-                        text: root.effectiveCuts().top
-                        color: "#f8fafc"
-                        horizontalAlignment: Text.AlignRight
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
+            CropEdgeSlider {
+                id: topSlider
+                label: "top"
+                edgeName: "top"
+                valueText: root.effectiveCuts().top
+                limit: root.verticalLimit()
+                onEdgeMoved: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.scheduleApply()
                 }
-
-                Slider {
-                    id: topSlider
-                    Layout.fillWidth: true
-                    from: 0
-                    to: root.verticalLimit()
-                    stepSize: 1
-                    live: true
-                    onMoved: {
-                        root.clampActiveSlider("top")
-                        root.scheduleApply()
-                    }
-                    onPressedChanged: if (!pressed) {
-                        root.clampActiveSlider("top")
-                        root.applySliderCrop()
-                    }
+                onEdgeReleased: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.applySliderCrop()
                 }
             }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 4
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "bottom"; color: "#c6ccd5"; font.pixelSize: 12; font.bold: true }
-                    Label {
-                        Layout.fillWidth: true
-                        text: root.effectiveCuts().bottom
-                        color: "#f8fafc"
-                        horizontalAlignment: Text.AlignRight
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
+            CropEdgeSlider {
+                id: bottomSlider
+                label: "bottom"
+                edgeName: "bottom"
+                valueText: root.effectiveCuts().bottom
+                limit: root.verticalLimit()
+                onEdgeMoved: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.scheduleApply()
                 }
-
-                Slider {
-                    id: bottomSlider
-                    Layout.fillWidth: true
-                    from: 0
-                    to: root.verticalLimit()
-                    stepSize: 1
-                    live: true
-                    onMoved: {
-                        root.clampActiveSlider("bottom")
-                        root.scheduleApply()
-                    }
-                    onPressedChanged: if (!pressed) {
-                        root.clampActiveSlider("bottom")
-                        root.applySliderCrop()
-                    }
+                onEdgeReleased: function(edge) {
+                    root.clampActiveSlider(edge)
+                    root.applySliderCrop()
                 }
             }
         }

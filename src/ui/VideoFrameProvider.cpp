@@ -2,41 +2,33 @@
 
 #include <QMutexLocker>
 
-VideoFrameProvider::VideoFrameProvider(QObject* parent)
-    : QObject(parent)
+VideoFrameProvider::VideoFrameProvider(QObject* parent) : QObject(parent)
 {
 }
 
 bool VideoFrameProvider::hasFrame() const
 {
     QMutexLocker locker(&mutex);
-    return !latestFrame.isNull();
-}
 
-QSize VideoFrameProvider::frameSize() const
-{
-    QMutexLocker locker(&mutex);
-    return latestFrame.size();
+    return !latestFrame.isNull();
 }
 
 QImage VideoFrameProvider::currentFrame(quint64* generation) const
 {
     QMutexLocker locker(&mutex);
-    if (generation) {
+
+    if (generation)
+    {
         *generation = frameGeneration;
     }
-    return latestFrame;
-}
 
-quint64 VideoFrameProvider::generation() const
-{
-    QMutexLocker locker(&mutex);
-    return frameGeneration;
+    return latestFrame;
 }
 
 bool VideoFrameProvider::setFrame(const QImage& frame)
 {
-    if (frame.isNull()) {
+    if (frame.isNull())
+    {
         return false;
     }
 
@@ -45,37 +37,49 @@ bool VideoFrameProvider::setFrame(const QImage& frame)
     const bool overwroteUnrenderedFrame = renderPending.exchange(true);
     bool hadFrame = false;
     quint64 newGeneration = 0;
+
     {
         QMutexLocker locker(&mutex);
+
         hadFrame = !latestFrame.isNull();
         latestFrame = frame;
         newGeneration = ++frameGeneration;
     }
 
-    if (!hadFrame) {
+    if (!hadFrame)
+    {
         emit hasFrameChanged();
     }
-    if (!overwroteUnrenderedFrame || newGeneration == 1) {
+
+    if (!overwroteUnrenderedFrame || newGeneration == 1)
+    {
         emit frameChanged();
     }
+
     return overwroteUnrenderedFrame;
 }
 
 void VideoFrameProvider::markFrameRendered(quint64 renderedGeneration)
 {
     bool shouldRequestAnotherUpdate = false;
+
     {
         QMutexLocker locker(&mutex);
+
         // Only clear renderPending when the rendered generation is still the
         // latest one. Otherwise a newer frame arrived and needs another pass.
-        if (frameGeneration == renderedGeneration) {
+        if (frameGeneration == renderedGeneration)
+        {
             renderPending.store(false);
-        } else {
+        }
+        else
+        {
             shouldRequestAnotherUpdate = true;
         }
     }
 
-    if (shouldRequestAnotherUpdate) {
+    if (shouldRequestAnotherUpdate)
+    {
         emit frameChanged();
     }
 }
@@ -83,16 +87,21 @@ void VideoFrameProvider::markFrameRendered(quint64 renderedGeneration)
 void VideoFrameProvider::clear()
 {
     renderPending.store(false);
+
     bool hadFrame = false;
+
     {
         QMutexLocker locker(&mutex);
+
         hadFrame = !latestFrame.isNull();
         latestFrame = QImage();
         ++frameGeneration;
     }
 
-    if (hadFrame) {
+    if (hadFrame)
+    {
         emit hasFrameChanged();
     }
+
     emit frameChanged();
 }

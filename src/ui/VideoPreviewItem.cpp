@@ -4,34 +4,36 @@
 #include <QSGSimpleTextureNode>
 #include <QSGTexture>
 
-namespace {
+namespace
+{
 
 QRectF centeredAspectFitRect(const QSize& sourceSize, const QRectF& bounds)
 {
-    if (sourceSize.isEmpty() || bounds.isEmpty()) {
+    if (sourceSize.isEmpty() || bounds.isEmpty())
+    {
         return {};
     }
 
     const QSizeF scaled = QSizeF(sourceSize).scaled(bounds.size(), Qt::KeepAspectRatio);
-    return QRectF(
-        bounds.x() + (bounds.width() - scaled.width()) / 2.0,
-        bounds.y() + (bounds.height() - scaled.height()) / 2.0,
-        scaled.width(),
-        scaled.height());
+
+    return QRectF(bounds.x() + (bounds.width() - scaled.width()) / 2.0,
+                  bounds.y() + (bounds.height() - scaled.height()) / 2.0, scaled.width(), scaled.height());
 }
 
-class ManagedTextureNode final : public QSGSimpleTextureNode {
-public:
+class ManagedTextureNode final : public QSGSimpleTextureNode
+{
+  public:
     ~ManagedTextureNode() override
     {
         delete texture();
     }
 
-    void replaceTexture(QSGTexture* newTexture)
+    void replaceTexture(QSGTexture* const newTexture)
     {
         // QSGSimpleTextureNode does not own textures by default. Replace and
         // delete explicitly to avoid leaking one texture per frame.
-        QSGTexture* oldTexture = texture();
+        QSGTexture* const oldTexture = texture();
+
         setTexture(newTexture);
         delete oldTexture;
     }
@@ -39,84 +41,74 @@ public:
 
 } // namespace
 
-VideoPreviewItem::VideoPreviewItem(QQuickItem* parent)
-    : QQuickItem(parent)
+VideoPreviewItem::VideoPreviewItem(QQuickItem* parent) : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
 }
 
-VideoFrameProvider* VideoPreviewItem::frameProvider() const
+void VideoPreviewItem::setFrameProvider(VideoFrameProvider* const newProvider)
 {
-    return provider;
-}
-
-void VideoPreviewItem::setFrameProvider(VideoFrameProvider* newProvider)
-{
-    if (provider == newProvider) {
+    if (provider == newProvider)
+    {
         return;
     }
 
     disconnectProvider();
     provider = newProvider;
 
-    if (provider) {
+    if (provider)
+    {
         frameConnection = connect(
-            provider,
-            &VideoFrameProvider::frameChanged,
-            this,
-            [this]() { update(); },
-            Qt::QueuedConnection);
-        hasFrameConnection = connect(
-            provider,
-            &VideoFrameProvider::hasFrameChanged,
-            this,
-            [this]() {
-                emit hasFrameChanged();
+            provider, &VideoFrameProvider::frameChanged, this,
+            [this]()
+            {
                 update();
             },
             Qt::QueuedConnection);
     }
 
     emit frameProviderChanged();
-    emit hasFrameChanged();
     update();
 }
 
-bool VideoPreviewItem::hasFrame() const
-{
-    return provider && provider->hasFrame();
-}
-
-QSGNode* VideoPreviewItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* updateData)
+QSGNode* VideoPreviewItem::updatePaintNode(QSGNode* const oldNode, UpdatePaintNodeData* const updateData)
 {
     Q_UNUSED(updateData)
 
-    auto* node = static_cast<ManagedTextureNode*>(oldNode);
+    if (!provider || !window())
+    {
+        delete oldNode;
 
-    if (!provider || !window()) {
-        delete node;
         return nullptr;
     }
 
     quint64 renderedGeneration = 0;
     const QImage frame = provider->currentFrame(&renderedGeneration);
-    if (frame.isNull()) {
-        delete node;
+
+    if (frame.isNull())
+    {
+        delete oldNode;
         provider->markFrameRendered(renderedGeneration);
+
         return nullptr;
     }
 
-    if (!node) {
-        node = new ManagedTextureNode;
+    ManagedTextureNode* const node = oldNode ? static_cast<ManagedTextureNode*>(oldNode) : new ManagedTextureNode;
+
+    if (!oldNode)
+    {
         node->setFiltering(QSGTexture::Linear);
     }
 
     // Upload through the scene graph instead of QPainter/QQuickPaintedItem. This
     // keeps preview on Qt Quick's rendering path and avoids an extra raster pass.
-    QSGTexture* texture = window()->createTextureFromImage(frame);
-    if (!texture) {
+    QSGTexture* const texture = window()->createTextureFromImage(frame);
+
+    if (!texture)
+    {
         delete node;
         provider->markFrameRendered(renderedGeneration);
+
         return nullptr;
     }
 
@@ -130,19 +122,18 @@ QSGNode* VideoPreviewItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData
 void VideoPreviewItem::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry)
 {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
-    if (newGeometry.size() != oldGeometry.size()) {
+
+    if (newGeometry.size() != oldGeometry.size())
+    {
         update();
     }
 }
 
 void VideoPreviewItem::disconnectProvider()
 {
-    if (frameConnection) {
+    if (frameConnection)
+    {
         disconnect(frameConnection);
         frameConnection = {};
-    }
-    if (hasFrameConnection) {
-        disconnect(hasFrameConnection);
-        hasFrameConnection = {};
     }
 }
