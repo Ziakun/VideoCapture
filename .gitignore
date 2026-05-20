@@ -30,3 +30,6 @@ build.ninja
 .vscode/
 *.user
 *.swp
+
+# Local agent instructions
+AGENTS.md
